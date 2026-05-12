@@ -162,7 +162,7 @@ function validateNewBelief(b: unknown): void {
 export function attemptRepair(raw: string): string | null {
   const clamped = raw.length > 32_000 ? raw.slice(0, 32_000) : raw;
 
-  const match = clamped.match(/\{[\s\S]*?\}/);
+  const match = clamped.match(/\{[\s\S]*\}/);
   if (!match) return null;
 
   try {
