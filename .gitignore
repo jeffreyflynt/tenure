@@ -1,0 +1,11 @@
+.venv
+node_modules
+test-results
+dist/
+*.tsbuildinfo
+.env
+*.log
+.DS_Store
+*.bkup
+start.sh
+coverage/

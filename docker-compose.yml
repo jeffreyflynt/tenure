@@ -1,0 +1,39 @@
+services:
+  mongo:
+    image: mongodb/mongodb-atlas-local:8
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    networks:
+      - internal
+
+  tenure:
+    build: ./
+    restart: unless-stopped
+    ports:
+      - "${TENURE_PORT:-5757}:5757"
+    volumes:
+      - ./config:/app/config
+      - ~/.tenure:/root/.tenure
+    environment:
+      CONFIG_PATH: /app/config/bootstrap.toml
+    depends_on:
+      - mongo
+    networks:
+      - internal
+      - external
+
+networks:
+  internal:
+    internal: true
+  external:
+
+volumes:
+  mongo_data:

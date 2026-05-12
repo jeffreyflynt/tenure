@@ -1,0 +1,11 @@
+services:
+  mongo:
+    ports:
+      - "27017:27017"
+    networks:
+      - internal
+      - external
+
+networks:
+  internal:
+    internal: false

@@ -1,0 +1,43 @@
+{
+  "compilerOptions": {
+    "target": "ES2024",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "lib": ["ES2024"],
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "types": ["node"],
+    "strict": true,
+    "noImplicitAny": true,
+    "strictNullChecks": true,
+    "strictFunctionTypes": true,
+    "noImplicitThis": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedIndexedAccess": false,
+    "exactOptionalPropertyTypes": true,
+
+    "verbatimModuleSyntax": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "moduleDetection": "force",
+
+    "incremental": true,
+    "tsBuildInfoFile": "./dist/.tsbuildinfo",
+    "sourceMap": true,
+    "declarationMap": false,
+    "declaration": false
+  },
+  "include": ["src/**/*"],
+  "exclude": [
+    "node_modules",
+    "**/*.test.ts",
+    "**/__fixtures__/**",
+    "**/__mocks__/**",
+    "dist"
+  ]
+}
