@@ -9,12 +9,15 @@ import { OpenAIAdapter } from "../providers/openai.js";
 import { AnthropicAdapter } from "../providers/anthropic.js";
 import type { Db } from "mongodb";
 import { rotateApiToken } from "../config/appConfig.js";
+import type { BeliefCompactionRunner } from "../jobs/compactionRunner.js";
 
 export interface AdminDeps {
   runtimeStore: RuntimeConfigStore;
   providers: ProviderRegistry;
   db: Db;
   updateToken: (t: string) => void;
+  compactionRunner: BeliefCompactionRunner;
+  userId: string;
 }
 
 const PROVIDER_CONFIG: Record<
@@ -64,6 +67,17 @@ export function registerAdminRoutes(
       compaction_mode: cfg.compaction_mode,
       scope_auto_detect: cfg.scope_auto_detect,
     };
+  });
+
+  app.post("/admin/maintenance/compact", async (_req, reply) => {
+    try {
+      await deps.compactionRunner.run(deps.userId);
+      return { ok: true };
+    } catch (e) {
+      return reply.code(500).send({
+        error: { message: (e as Error).message },
+      });
+    }
   });
 
   app.put<{ Params: { key: string }; Body: { value: unknown } }>(
