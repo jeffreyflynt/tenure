@@ -156,6 +156,8 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     updateToken: (t: string) => {
       liveToken = t;
     },
+    compactionRunner: deps.compactionRunner,
+    userId: deps.userId,
   };
   registerAdminRoutes(app, adminDeps);
 
@@ -224,13 +226,11 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     );
   });
 
-  // In server.ts, replace the extraction sweep job setup:
-
   app.addHook("onReady", async () => {
     let consecutiveEmpty = 0;
-    const BASE_INTERVAL_MS = 60_000; // 1 minute
-    const MAX_INTERVAL_MS = 5 * 60_000; // 5 minutes max backoff
-    const BACKOFF_AFTER = 3; // start backing off after 3 empty sweeps
+    const BASE_INTERVAL_MS = 60_000;
+    const MAX_INTERVAL_MS = 5 * 60_000;
+    const BACKOFF_AFTER = 3;
 
     let currentJob: SimpleIntervalJob | null = null;
 
@@ -243,7 +243,6 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
           if (processed === 0) {
             consecutiveEmpty++;
 
-            // Back off when consistently idle
             if (consecutiveEmpty >= BACKOFF_AFTER) {
               const newInterval = Math.min(
                 BASE_INTERVAL_MS *
@@ -251,7 +250,6 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
                 MAX_INTERVAL_MS,
               );
 
-              // Reschedule at slower interval
               if (currentJob) {
                 app.scheduler.removeById("extraction-sweep");
               }
@@ -263,7 +261,6 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
               app.scheduler.addSimpleIntervalJob(currentJob);
             }
           } else {
-            // Work found — reset to base interval if backed off
             if (consecutiveEmpty >= BACKOFF_AFTER) {
               if (currentJob) {
                 app.scheduler.removeById("extraction-sweep");

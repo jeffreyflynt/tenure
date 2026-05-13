@@ -126,7 +126,7 @@ services:
     image: $IMAGE
     restart: unless-stopped
     ports:
-      - "127.0.0.1:\${TENURE_PORT:-5757}:5757"
+      - "${TENURE_PORT:-5757}:5757"
     volumes:
       - ${INSTALL_DIR}/config:/app/config
       - ${INSTALL_DIR}:/app/.tenure
@@ -140,6 +140,8 @@ services:
     networks:
       - internal
       - external
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
 networks:
   internal:
