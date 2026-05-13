@@ -122,7 +122,7 @@ services:
     volumes:
       - mongo_data:/data/db
 
-  proxy:
+  tenure:
     image: $IMAGE
     restart: unless-stopped
     ports:
@@ -177,7 +177,7 @@ done
 
 if [ $ATTEMPTS -eq $MAX_ATTEMPTS ]; then
   warn "Tenure started but did not become healthy within 60 seconds."
-  echo "  Check logs: docker compose -f $COMPOSE_FILE logs proxy"
+  echo "  Check logs: docker compose -f $COMPOSE_FILE logs tenure"
   echo "  It may still be initializing. Try opening http://localhost:${TENURE_PORT} in a moment."
 else
   info "Tenure is ready!"
@@ -188,7 +188,7 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 echo "  Tenure is running at http://localhost:${TENURE_PORT}"
 echo ""
 echo "  Your API token:"
-docker compose -f "$COMPOSE_FILE" logs proxy 2>/dev/null | grep -i "API token:" | tail -1 | sed 's/^/  /'
+docker compose -f "$COMPOSE_FILE" logs tenure 2>/dev/null | grep -i "API token:" | tail -1 | sed 's/^/  /'
 echo ""
 echo "  Open http://localhost:${TENURE_PORT}/onboarding to get started."
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"

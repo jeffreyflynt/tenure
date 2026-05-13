@@ -75,7 +75,7 @@ async function verifyEncryptionActive(
 }
 
 export async function buildApp(config: BootstrapConfig) {
-  const beliefKeyPath = getBeliefMasterKeyPath();
+  const beliefKeyPath = getBeliefMasterKeyPath(process.env.TENURE_HOME);
   const beliefMasterKey = loadOrCreateLocalMasterKey(beliefKeyPath);
 
   console.log("Initializing belief encryption key...");
