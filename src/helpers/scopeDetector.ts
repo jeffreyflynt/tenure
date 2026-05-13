@@ -21,12 +21,68 @@ export interface ExtractInterceptResult {
 
 export type CommandAction = "off" | "on" | "global-off" | "global-on";
 
+const SCOPE_PATTERN =
+  /^(domain:[a-z0-9_-]+(\/[a-z0-9_-]+)*|project:[a-z0-9_-]+|user:universal)$/;
+
+const VALID_ACTIONS: CommandAction[] = ["on", "off", "global-on", "global-off"];
+
+export function validateCommandInput(
+  type: "scope",
+  parts: string[],
+): { valid: true; parts: string[] } | { valid: false; message: string };
+
+export function validateCommandInput(
+  type: "extract" | "inject",
+  action: CommandAction,
+): { valid: true } | { valid: false; message: string };
+
+export function validateCommandInput(
+  type: "scope" | "extract" | "inject",
+  input: string[] | CommandAction,
+): { valid: true; parts?: string[] } | { valid: false; message: string } {
+  if (type === "scope") {
+    const parts = input as string[];
+
+    if (parts.length === 0) {
+      return {
+        valid: false,
+        message:
+          "No scope provided. Usage: `!scope domain:code` or `!scope domain:code domain:writing`",
+      };
+    }
+
+    const invalid = parts.filter((s) => !SCOPE_PATTERN.test(s));
+    if (invalid.length > 0) {
+      return {
+        valid: false,
+        message:
+          `Invalid scope format: ${invalid.map((s) => `\`${s}\``).join(", ")}. ` +
+          `Use \`domain:code\`, \`domain:code/typescript\`, or \`project:my-project\`.`,
+      };
+    }
+
+    return { valid: true, parts };
+  }
+
+  const action = input as CommandAction;
+  if (!VALID_ACTIONS.includes(action)) {
+    return {
+      valid: false,
+      message:
+        `Unknown ${type} command. Valid commands: ` +
+        `\`!${type} on\`, \`!${type} off\`, ` +
+        `\`!${type} global on\`, \`!${type} global off\`.`,
+    };
+  }
+
+  return { valid: true };
+}
+
 export function expandScopeHierarchy(scopes: string[]): string[] {
   const expanded = new Set<string>();
   for (const scope of scopes) {
     expanded.add(scope);
-    // domain:code/typescript → also add domain:code
-    // domain:code/python/async → also add domain:code/python and domain:code
+
     const parts = scope.split("/");
     if (parts.length > 1) {
       for (let i = 1; i < parts.length; i++) {
@@ -72,20 +128,17 @@ export async function tryInterceptScopeCommand(
   const raw = matchScopeCommand(content);
   if (raw === null) return null;
 
-  if (!raw) {
-    return {
-      message:
-        "No scope provided. Usage: `!scope domain:code` or `!scope domain:code domain:writing`",
-      newScope: [],
-    };
+  const parts = raw
+    .split(/[\s,]+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  const validation = validateCommandInput("scope", parts);
+  if (!validation.valid) {
+    return { message: validation.message, newScope: [] };
   }
 
-  const newScope = expandScopeHierarchy(
-    raw
-      .split(/[\s,]+/)
-      .map((s) => s.trim())
-      .filter(Boolean),
-  );
+  const newScope = expandScopeHierarchy(validation.parts!);
 
   try {
     await deps.sessions.update(sessionId, userId, { activeScope: newScope });
@@ -219,6 +272,11 @@ export async function tryInterceptExtractCommand(
   const action = matchExtractCommand(content);
   if (action === null) return null;
 
+  const validation = validateCommandInput("extract", action);
+  if (!validation.valid) {
+    return { message: validation.message };
+  }
+
   switch (action) {
     case "off":
       try {
@@ -314,6 +372,11 @@ export async function tryInterceptInjectCommand(
 ): Promise<ExtractInterceptResult | null> {
   const action = matchInjectCommand(content);
   if (action === null) return null;
+
+  const validation = validateCommandInput("inject", action);
+  if (!validation.valid) {
+    return { message: validation.message };
+  }
 
   switch (action) {
     case "off":

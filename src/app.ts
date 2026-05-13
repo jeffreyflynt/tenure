@@ -32,7 +32,7 @@ async function verifyEncryptionActive(
   mongoUri: string,
   mongoDbName: string,
 ): Promise<void> {
-  const testCol = db.collection("__encryption_check");
+  const testCol = db.collection("beliefs");
   const testId = randomBytes(8).toString("hex"); // string id, not ObjectId
   const testContent = `encryption-verify-${randomBytes(8).toString("hex")}`;
 
@@ -40,6 +40,8 @@ async function verifyEncryptionActive(
     await testCol.insertOne({
       _id: testId as unknown as any,
       content: testContent,
+      user_id: "__encryption_verify__",
+      canonical_name: `__verify__${testId}`,
       created_at: new Date(),
     });
 
@@ -56,13 +58,12 @@ async function verifyEncryptionActive(
         .collection("__encryption_check")
         .findOne({ _id: testId as unknown as any });
 
-      if (
-        rawDoc?.content === testContent ||
-        typeof rawDoc?.content === "string"
-      ) {
+      if (rawDoc?.content === testContent) {
+        throw new Error("CSFLE MISCONFIGURED: content stored as plaintext...");
+      }
+      if (typeof rawDoc?.content === "string") {
         throw new Error(
-          "CSFLE MISCONFIGURED: belief content is being stored as plaintext. " +
-            "Check CRYPT_SHARED_LIB_PATH and restart.",
+          "CSFLE MISCONFIGURED: content is a string, not Binary...",
         );
       }
     } finally {

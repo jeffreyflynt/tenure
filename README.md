@@ -3,7 +3,7 @@
 ![Build](https://github.com/jeffreyflynt/tenure/actions/workflows/ci.yml/badge.svg)
 ![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)
 ![Docker](https://img.shields.io/badge/docker-ready-blue?logo=docker)
-![arXiv](https://img.shields.io/badge/arXiv-2505.XXXXX-b31b1b.svg)
+![arXiv](https://img.shields.io/badge/arXiv-2605.11325-b31b1b.svg)
 
 _Stop briefing strangers. Start working with a model that already knows your work._
 
