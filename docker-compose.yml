@@ -21,9 +21,10 @@ services:
       - "${TENURE_PORT:-5757}:5757"
     volumes:
       - ./config:/app/config
-      - ~/.tenure:/root/.tenure
+      - ~/.tenure:/app/.tenure
     environment:
       CONFIG_PATH: /app/config/bootstrap.toml
+      TENURE_HOME: /app/.tenure
     depends_on:
       - mongo
     networks:

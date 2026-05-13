@@ -132,6 +132,7 @@ services:
       - ${INSTALL_DIR}:/app/.tenure
     environment:
       CONFIG_PATH: /app/config/bootstrap.toml
+      TENURE_HOME: /app/.tenure
       MONGODB_URI: mongodb://\${MONGO_INITDB_ROOT_USERNAME}:\${MONGO_INITDB_ROOT_PASSWORD}@mongo:27017/?directConnection=true&authSource=admin
     depends_on:
       mongo:

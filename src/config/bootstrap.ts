@@ -11,14 +11,15 @@ export interface BootstrapConfig {
   master_key_path: string;
 }
 
-const CONFIG_PATH = resolve(homedir(), ".tenure/config.toml");
+const TENURE_HOME = process.env.TENURE_HOME ?? resolve(homedir(), ".tenure");
+const CONFIG_PATH = resolve(TENURE_HOME, "config.toml");
 
 const DEFAULT: BootstrapConfig = {
   mongodb_uri: "mongodb://mongo:27017/?directConnection=true",
   mongodb_db: "tenure",
   port: 5757,
   user_id: "local",
-  master_key_path: resolve(homedir(), ".tenure/master.key"),
+  master_key_path: resolve(TENURE_HOME, "master.key"),
 };
 
 const CONFIG_TOML = (c: BootstrapConfig) => `mongodb_uri = "${c.mongodb_uri}"
