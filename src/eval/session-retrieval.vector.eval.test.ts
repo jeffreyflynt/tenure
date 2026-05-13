@@ -553,7 +553,6 @@ for (const sessionCase of sessionCases) {
     const vectorReader = new BeliefsReaderVector(beliefsCol, cachedEmbed);
 
     const compositeReader = {
-      listAlwaysOn: bm25Reader.listAlwaysOn.bind(bm25Reader),
       listPinnedFacts: bm25Reader.listPinnedFacts.bind(bm25Reader),
       listByScope: bm25Reader.listByScope.bind(bm25Reader),
       listPinnedOpenQuestions:

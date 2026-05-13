@@ -293,5 +293,7 @@ function redactForClient(b: WithId<Belief>) {
     epistemic_status: b.epistemic_status,
     confidence: b.confidence,
     pinned: b.pinned,
+    scope: b.scope,
+    aliases: b.aliases,
   };
 }

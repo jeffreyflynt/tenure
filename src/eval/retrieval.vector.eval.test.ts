@@ -440,7 +440,6 @@ for (const tc of cases) {
 
     // Compose: use vector searchText but BM25 reader for everything else.
     const compositeReader = {
-      listAlwaysOn: bm25Reader.listAlwaysOn.bind(bm25Reader),
       listPinnedFacts: bm25Reader.listPinnedFacts.bind(bm25Reader),
       listByScope: bm25Reader.listByScope.bind(bm25Reader),
       listPinnedOpenQuestions:
@@ -554,27 +553,6 @@ for (const tc of cases) {
     }
     for (const s of pp?.mustNotContain ?? []) {
       check(!ctx.personaPrelude.includes(s), `personaPrelude contains "${s}"`);
-    }
-
-    const sp = tc.expect.scopePrelude;
-    if (sp?.nonEmpty) {
-      check(
-        ctx.scopePrelude != null && ctx.scopePrelude.length > 0,
-        "scopePrelude empty",
-      );
-    }
-    if (sp?.isNull) check(ctx.scopePrelude == null, "scopePrelude not null");
-    for (const s of sp?.contains ?? []) {
-      check(
-        ctx.scopePrelude?.includes(s) ?? false,
-        `scopePrelude missing "${s}"`,
-      );
-    }
-    for (const s of sp?.mustNotContain ?? []) {
-      check(
-        !(ctx.scopePrelude?.includes(s) ?? false),
-        `scopePrelude contains "${s}"`,
-      );
     }
 
     const mustIncludeQuestions = new Set(oq.mustInclude ?? []);

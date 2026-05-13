@@ -12,6 +12,7 @@ export interface EnqueueParams {
   parseStatus: ParseStatus;
   scope: string[];
   sourceModel: string;
+  clientCategory?: string;
 }
 
 export interface EnqueueOnboardingParams {
@@ -59,6 +60,9 @@ export class ExtractionJobQueue {
         parse_status: params.parseStatus,
         scope: params.scope,
         source_model: params.sourceModel,
+        ...(params.clientCategory !== undefined && {
+          client_category: params.clientCategory,
+        }),
       },
     };
     await this.col.insertOne(job);

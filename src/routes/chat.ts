@@ -20,13 +20,14 @@ import {
 } from "../providers/registry.js";
 import { ExtractionJobQueue } from "../jobs/queue.js";
 import type {
+  ContentPart,
   Message,
   NormalizedResponse,
   ProviderAdapter,
   SystemPrompt,
   SystemPromptParts,
 } from "../providers/types.ts";
-import { hasBinary, hasCodeBlock } from "../helpers/content.js";
+import { extractText, hasBinary, hasCodeBlock } from "../helpers/content.js";
 import { deriveSessionId } from "../session/derivation.js";
 import { checkModelTier, listSupportedFamilies } from "../providers/tiers.js";
 import type { ExtractionWorkerLike } from "../extraction/worker.js";
@@ -37,8 +38,11 @@ import {
   detectScopeFromMessage,
   fetchExistingUserScopes,
   type ScopeDetectorDeps,
+  tryInterceptExtractCommand,
+  tryInterceptInjectCommand,
 } from "../helpers/scopeDetector.js";
 import type { ErrorLogger } from "../errors/logger.js";
+import { parseClient, type ParsedClient } from "../helpers/clientDetector.js";
 
 export interface ChatDeps {
   sessions: SessionManager;
@@ -55,7 +59,11 @@ export interface ChatDeps {
 
 interface ChatBody {
   model?: string;
-  messages: Array<{ role: string; content: string; name?: string }>;
+  messages: Array<{
+    role: string;
+    content: string | ContentPart[];
+    name?: string;
+  }>;
   stream?: boolean;
   temperature?: number;
   max_tokens?: number;
@@ -204,18 +212,29 @@ export function registerChatRoute(app: FastifyInstance, deps: ChatDeps): void {
       : (session?.activeScope ?? []);
 
     const turnId = randomUUID();
-    const rawContent = messages.at(-1)?.content ?? "";
-    const latestUserMessage = extractLatestUserMessage(messages);
+    const rawContent: string | ContentPart[] = messages.at(-1)?.content ?? "";
+    const latestUserMessage = extractLatestUserText(messages);
 
+    // Load config once. All flag derivations below use this single result.
     const cfg = await deps.runtimeStore.load().catch(() => ({
       extraction_enabled: true,
+      injection_enabled: true,
       managed_history_token_cap: 120000,
       compaction_mode: "aggressive" as const,
       scope_auto_detect: true,
     }));
 
+    // Parse the UA string once. isIde gates extraction suppression for IDE
+    // clients [17]. The structured fields are available for logging/analytics
+    // without a second parse.
+    const client = parseClient(req.headers["user-agent"] as string | undefined);
+
+    // ── Command intercepts ────────────────────────────────────────────────────
+    // All three intercepts run before any LLM or context work. Each returns
+    // a synthetic completion immediately if it matches.
+
     const intercepted = await tryInterceptScopeCommand(
-      rawContent,
+      typeof rawContent === "string" ? rawContent : extractText(rawContent),
       sessionId,
       userId,
       deps,
@@ -251,6 +270,78 @@ export function registerChatRoute(app: FastifyInstance, deps: ChatDeps): void {
       });
     }
 
+    const extractIntercepted = await tryInterceptExtractCommand(
+      typeof rawContent === "string" ? rawContent : extractText(rawContent),
+      sessionId,
+      userId,
+      { sessions: deps.sessions, runtimeStore: deps.runtimeStore },
+      req.log,
+    );
+
+    if (extractIntercepted) {
+      if (tierWarning) reply.header("x-tenure-warning", tierWarning);
+      return reply.send({
+        id: `chatcmpl-${turnId}`,
+        object: "chat.completion",
+        created: Math.floor(Date.now() / 1000),
+        model: requestedModel,
+        choices: [
+          {
+            index: 0,
+            message: {
+              role: "assistant",
+              content: extractIntercepted.message,
+            },
+            finish_reason: "stop",
+          },
+        ],
+        usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+        tenure: {
+          session_id: sessionId,
+          turn_id: turnId,
+          scope,
+          parse_status: "missing",
+          degraded: false,
+          context: { beliefs: 0, questions: 0, compacted_turns: 0 },
+        },
+      });
+    }
+
+    const injectIntercepted = await tryInterceptInjectCommand(
+      typeof rawContent === "string" ? rawContent : extractText(rawContent),
+      sessionId,
+      userId,
+      { sessions: deps.sessions, runtimeStore: deps.runtimeStore },
+      req.log,
+    );
+
+    if (injectIntercepted) {
+      if (tierWarning) reply.header("x-tenure-warning", tierWarning);
+      return reply.send({
+        id: `chatcmpl-${turnId}`,
+        object: "chat.completion",
+        created: Math.floor(Date.now() / 1000),
+        model: requestedModel,
+        choices: [
+          {
+            index: 0,
+            message: { role: "assistant", content: injectIntercepted.message },
+            finish_reason: "stop",
+          },
+        ],
+        usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+        tenure: {
+          session_id: sessionId,
+          turn_id: turnId,
+          scope,
+          parse_status: "missing",
+          degraded: false,
+          context: { beliefs: 0, questions: 0, compacted_turns: 0 },
+        },
+      });
+    }
+
+    // ── First-turn scope detection ─────────────────────────────────────────
     const isFirstTurn =
       (session?.turnCounter ?? 0) === 0 &&
       scope.length === 0 &&
@@ -288,27 +379,65 @@ export function registerChatRoute(app: FastifyInstance, deps: ChatDeps): void {
       }
     }
 
+    // ── Flag derivation ────────────────────────────────────────────────────
+    // Both flags are derived from the single cfg load above. Session-level
+    // flags compose with the global flags: either being true suppresses the
+    // behaviour for this request.
+    //
+    // extractionEnabled also gates IDE clients [17] — IDE traffic is read-only
+    // by default. injectionEnabled is intentionally independent: IDE clients
+    // still receive belief injection.
+    //
+    // The X-Tenure-No-Extract header [17] provides per-request extraction
+    // suppression without touching session or global state.
+    const noExtractHeader =
+      req.headers["x-tenure-no-extract"] === "true" ||
+      req.headers["x-tenure-no-extract"] === "1";
+
+    const extractionEnabled =
+      cfg.extraction_enabled !== false &&
+      session?.extractionPaused !== true &&
+      !client.isIde &&
+      !noExtractHeader;
+
+    const injectionEnabled =
+      cfg.injection_enabled !== false && session?.injectionPaused !== true;
+
+    // ── Context assembly ───────────────────────────────────────────────────
+    // context.build() is skipped entirely when injection is off — there is no
+    // point paying for a vector search and MongoDB round trip when the results
+    // will not be used.
     const [beliefCtx, rendered] = await Promise.all([
-      deps.context.build(userId, scope, latestUserMessage).catch((err) => {
-        req.log.warn({ err }, "context assembly failed");
-        return EMPTY_CONTEXT;
-      }),
+      injectionEnabled
+        ? deps.context.build(userId, scope, latestUserMessage).catch((err) => {
+            req.log.warn({ err }, "context assembly failed");
+            return EMPTY_CONTEXT;
+          })
+        : Promise.resolve(EMPTY_CONTEXT),
       deps.history
         .renderCompacted(sessionId, cfg.managed_history_token_cap, {
           compactionMode: cfg.compaction_mode,
         })
         .catch(() => EMPTY_RENDERED),
-      deps.runtimeStore.load().catch(() => ({ extraction_enabled: true })),
     ]);
 
-    const extractionEnabled = cfg.extraction_enabled !== false;
-
+    // ── System prompt ──────────────────────────────────────────────────────
     let systemPrompt: SystemPrompt;
+
+    const incomingSystem = messages.find((m) => m.role === "system")?.content;
+    const incomingSystemText =
+      incomingSystem === undefined
+        ? undefined
+        : typeof incomingSystem === "string"
+          ? incomingSystem
+          : extractText(incomingSystem);
+
     try {
       systemPrompt = buildSystemPrompt({
-        incomingSystem: messages.find((m) => m.role === "system")?.content,
+        incomingSystem: incomingSystemText,
         beliefCtx,
         extractionEnabled,
+        injectionEnabled,
         activeScope: scope[0],
         scopeAutoDetect: cfg.scope_auto_detect !== false,
       });
@@ -362,10 +491,13 @@ export function registerChatRoute(app: FastifyInstance, deps: ChatDeps): void {
           tierWarning,
           logger: req.log,
           extractionEnabled,
+          injectionEnabled,
+          client,
         },
       );
     }
 
+    // ── Non-streaming path ─────────────────────────────────────────────────
     let providerResp: NormalizedResponse;
     try {
       providerResp = await adapter.call(normalizedReq, systemPrompt);
@@ -480,6 +612,7 @@ export function registerChatRoute(app: FastifyInstance, deps: ChatDeps): void {
         session,
         logger: req.log,
         extractionEnabled,
+        client,
       });
     } catch (err) {
       req.log.error(
@@ -490,13 +623,15 @@ export function registerChatRoute(app: FastifyInstance, deps: ChatDeps): void {
   });
 }
 
+// ── Streaming ────────────────────────────────────────────────────────────────
+
 interface StreamingCtx {
   turnId: string;
   sessionId: string;
   userId: string;
   requestedModel: string;
   latestUserMessage: string;
-  rawContent: string;
+  rawContent: string | ContentPart[];
   scope: string[];
   deps: ChatDeps;
   session: (Session & { providerId: string; model: string }) | null;
@@ -505,6 +640,8 @@ interface StreamingCtx {
   tierWarning: string | null;
   logger: FastifyBaseLogger;
   extractionEnabled: boolean;
+  injectionEnabled: boolean;
+  client: ParsedClient;
 }
 
 async function handleStreamingResponse(
@@ -692,6 +829,10 @@ async function handleStreamingResponse(
   const { visible, sidecarRaw, parseStatus } = splitSidecar(fullContent);
   const turnSignal = tryReadTurnSignal(sidecarRaw);
 
+  // client is in scope here from the outer registerChatRoute closure.
+  // Both extractionEnabled and injectionEnabled are threaded through
+  // StreamingCtx so the streaming path honours the same flags as the
+  // non-streaming path.
   runSideEffects({
     deps: ctx.deps,
     userId: ctx.userId,
@@ -709,8 +850,11 @@ async function handleStreamingResponse(
     session: ctx.session,
     logger: ctx.logger,
     extractionEnabled: ctx.extractionEnabled,
+    client: ctx.client,
   });
 }
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
 async function writeSSE(raw: ServerResponse, data: unknown): Promise<void> {
   const ok = raw.write(`data: ${JSON.stringify(data)}\n\n`);
@@ -730,7 +874,7 @@ interface SideEffectInput {
   turnId: string;
   latestUserMessage: string;
   visible: string;
-  rawContent: string;
+  rawContent: string | ContentPart[];
   sidecarRaw: string | null;
   parseStatus: string;
   scope: string[];
@@ -740,6 +884,7 @@ interface SideEffectInput {
   session: (Session & { providerId: string; model: string }) | null;
   logger: FastifyBaseLogger;
   extractionEnabled: boolean;
+  client: ParsedClient;
 }
 
 async function runSideEffects(input: SideEffectInput): Promise<void> {
@@ -781,6 +926,7 @@ async function runSideEffects(input: SideEffectInput): Promise<void> {
         parseStatus: input.parseStatus as "parsed" | "needs_repair" | "missing",
         scope: input.scope,
         sourceModel: `${input.adapter.id}:${input.model}`,
+        clientCategory: input.client.category,
       });
       input.deps.extractionWorker
         .processById(jobId)
@@ -810,100 +956,121 @@ async function runSideEffects(input: SideEffectInput): Promise<void> {
   }
 }
 
-function extractLatestUserMessage(
-  messages: Array<{ role: string; content: string }>,
+function extractLatestUserText(
+  messages: Array<{ role: string; content: string | ContentPart[] }>,
 ): string {
   for (let i = messages.length - 1; i >= 0; i--) {
-    if (messages[i].role === "user") return messages[i].content;
+    if (messages[i].role === "user") {
+      const content = messages[i].content;
+      if (typeof content === "string") return content;
+      return extractText(content);
+    }
   }
   return "";
 }
+
+// ── System prompt ─────────────────────────────────────────────────────────────
 
 interface BuildSystemPromptArgs {
   incomingSystem: string | undefined;
   beliefCtx: BuiltContext;
   extractionEnabled: boolean;
+  injectionEnabled: boolean;
   activeScope: string | undefined;
   scopeAutoDetect: boolean;
 }
 
 function buildSystemPrompt(args: BuildSystemPromptArgs): SystemPromptParts {
-  const staticSection = args.extractionEnabled
-    ? [
-        "You have a secondary task: after your visible response, emit a hidden " +
-          "metadata block recording beliefs about this user. While responding, " +
-          "note facts the user would be frustrated to re-establish next session: " +
-          "their preferences, decisions, project commitments, working principles, " +
-          "and how they think and engage. " +
-          "Respond fully first; the extraction format follows.",
-        buildSidecarInstructions({
-          activeScope: args.activeScope,
-          scopeAutoDetect: args.scopeAutoDetect,
-        }),
-      ].join("\n\n")
-    : "";
+  const staticParts: string[] = [];
 
-  const stableBeliefLines: string[] = [
-    "You have persistent memory of this user.",
-    "The <persona> block describes who they are and how they want to be engaged — standing context, not facts to quote.",
-    "The <scope> block narrows that persona to the current domain.",
-    "",
-    "<pinned_facts> are standing constraints — treat them as hard requirements that shape every answer.",
-    "<relevant_beliefs> are query-surfaced context — use them to disambiguate and inform, not as hard constraints.",
-    "",
-    "For each belief, the why_it_matters field is the primary action directive: it tells you what to change in your response.",
-    "Beliefs with epistemic_status 'inferred' are system hypotheses — hold them loosely.",
-    "Beliefs with epistemic_status 'exploratory' are unresolved — do not treat them as settled.",
-    "Beliefs with confidence below 0.65 are low-certainty — weight them accordingly.",
-    "Treat open questions as unresolved; do not invent closure.",
-  ];
-
-  if (args.beliefCtx.personaPrelude) {
-    stableBeliefLines.push(
-      "<persona>",
-      args.beliefCtx.personaPrelude,
-      "</persona>",
-      "",
+  // Sidecar extraction instructions — only when extraction is on.
+  // These are in the static tier so they qualify for prompt caching.
+  if (args.extractionEnabled) {
+    staticParts.push(
+      "You have a secondary task: after your visible response, emit a hidden " +
+        "metadata block recording beliefs about this user. While responding, " +
+        "note facts the user would be frustrated to re-establish next session: " +
+        "their preferences, decisions, project commitments, working principles, " +
+        "and how they think and engage. " +
+        "Respond fully first; the extraction format follows.",
+      buildSidecarInstructions({
+        activeScope: args.activeScope,
+        scopeAutoDetect: args.scopeAutoDetect,
+      }),
     );
   }
 
-  stableBeliefLines.push(
-    "<pinned_facts>",
-    args.beliefCtx.pinnedFactsJson,
-    "</pinned_facts>",
-  );
+  // Persona and belief framing — only when injection is on.
+  // When injection is off we send no world model context at all.
+  if (args.injectionEnabled) {
+    if (args.beliefCtx.personaPrelude) {
+      staticParts.push(
+        "<persona>",
+        args.beliefCtx.personaPrelude,
+        "</persona>",
+      );
+    }
 
-  const beliefsSection = stableBeliefLines.join("\n");
+    staticParts.push(
+      [
+        "You have persistent memory of this user.",
+        "The <persona> block above describes who they are and how they want to be engaged — standing context, not facts to quote.",
+        "",
+        "<pinned_facts> are standing constraints — treat them as hard requirements that shape every answer.",
+        "<relevant_beliefs> are query-surfaced context — use them to disambiguate and inform, not as hard constraints.",
+        "",
+        "For each belief, the why_it_matters field is the primary action directive: it tells you what to change in your response.",
+        "Beliefs with epistemic_status 'inferred' are system hypotheses — hold them loosely.",
+        "Beliefs with epistemic_status 'exploratory' are unresolved — do not treat them as settled.",
+        "Beliefs with confidence below 0.65 are low-certainty — weight them accordingly.",
+        "Treat open questions as unresolved; do not invent closure.",
+      ].join("\n"),
+    );
+  }
 
-  const dynamicBeliefLines: string[] = [
-    "<relevant_beliefs>",
-    args.beliefCtx.relevantBeliefsJson,
-    "</relevant_beliefs>",
-    "",
-    "### Open Questions",
-    args.beliefCtx.openQuestionsJson,
-  ];
+  // staticSection is always assigned regardless of either flag.
+  const staticSection = staticParts.join("\n\n");
+
+  // beliefsSection is always assigned — empty string when injection is off.
+  const beliefsSection = args.injectionEnabled
+    ? [
+        "<pinned_facts>",
+        args.beliefCtx.pinnedFactsJson,
+        "</pinned_facts>",
+      ].join("\n")
+    : "";
 
   const dynamicParts: string[] = [];
 
-  dynamicParts.push(dynamicBeliefLines.join("\n"));
+  // Relevant beliefs and open questions — only when injection is on.
+  if (args.injectionEnabled) {
+    dynamicParts.push(
+      [
+        "<relevant_beliefs>",
+        args.beliefCtx.relevantBeliefsJson,
+        "</relevant_beliefs>",
+        "",
+        "### Open Questions",
+        args.beliefCtx.openQuestionsJson,
+      ].join("\n"),
+    );
+  }
 
   if (args.incomingSystem) {
     dynamicParts.push(args.incomingSystem.trim());
   }
 
+  // Final instruction — always present, varies only on whether extraction is on.
   dynamicParts.push(
     args.extractionEnabled
       ? "--- Respond to the user's message. After your complete, visible response, append the sidecar block. ---"
       : "--- Respond to the user's message. ---",
   );
 
-  const dynamicSection = dynamicParts.join("\n\n");
-
   return {
     static: staticSection,
     beliefs: beliefsSection,
-    dynamic: dynamicSection,
+    dynamic: dynamicParts.join("\n\n"),
   };
 }
 

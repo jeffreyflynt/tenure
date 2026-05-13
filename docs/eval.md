@@ -5,8 +5,6 @@ backends, alias-weighted BM25 and cosine similarity over dense embeddings,
 run against identical seed corpora with identical assertion logic. This
 document explains how to reproduce those results.
 
----
-
 ## What the Evaluation Covers
 
 The suite has 72 cases across four test files:
@@ -35,8 +33,6 @@ verify that drift-turn beliefs do not contaminate re-entry retrieval.
 Each run produces a JSON report in `test-results/` with per-case scores,
 retrieved belief IDs, and clause-level BM25 score attribution.
 
----
-
 ## Prerequisites
 
 - Docker
@@ -49,7 +45,12 @@ the seed corpus. No Ollama installation is required to run the vector eval
 unless you want to regenerate embeddings with a different model (see
 Regenerating Embeddings below).
 
----
+To reproduce the exact results reported in the paper, check out the
+`arxiv-submission` tag before running any eval commands:
+
+​`bash
+git checkout v1.0.0-paper
+​`
 
 ## Running the BM25 Evaluation
 
@@ -77,8 +78,6 @@ Each command:
 
 The BM25 eval requires no external services beyond Docker.
 
----
-
 ## Running the Vector Evaluation
 
 ### Static cases (vector)
@@ -96,8 +95,6 @@ npx ava src/eval/session-retrieval.vector.eval.test.ts --timeout=5m
 The vector eval reads from `beliefs.seed.embedded.json`, which is committed
 to the repository. No Ollama installation is required at test runtime.
 
----
-
 ## Running the Static Evals Together
 
 ```bash
@@ -110,8 +107,6 @@ and ports and can run concurrently.
 
 The session evals must be run separately (see above). The BM25 session eval
 filename does not match the glob pattern.
-
----
 
 ## Regenerating Embeddings (Optional)
 
@@ -136,8 +131,6 @@ The script writes a new `beliefs.seed.embedded.json`. Regenerating with a
 different model changes the vector eval results; the paper's reported results
 (8/72, drift scores 0.43–0.50) used `nomic-embed-text` and are not
 reproducible with a different model.
-
----
 
 ## Reading the Reports
 
@@ -231,8 +224,6 @@ drift score of 0.25, not 1.0. A drift score of 0.0 indicates perfect noise
 isolation. The paper reports BM25 drift scores of 0.0 across all session
 turns and vector drift scores of 0.43–0.50 on noise-critical turns 9 and 10.
 
----
-
 ## Expected Results
 
 Running both backends against the published seed corpus should reproduce the
@@ -248,9 +239,10 @@ only belief in scope; scope isolation does the work that retrieval precision
 cannot. On every case where multiple beliefs occupy the same scope, vector
 search fails the precision assertion.
 
----
-
 ## Seed Corpus
+
+The seed corpus is fixed and committed at tag `v1.0.0-paper`. To
+guarantee an identical corpus, check out that tag before running evals.
 
 The evaluation runs against a fixed 30-belief seed corpus defined in
 `src/__fixtures__/beliefs.seed.json`. The corpus contains:
@@ -270,8 +262,6 @@ The seed corpus is fixed and committed. Do not modify it between BM25 and
 vector runs, the comparison is only valid against identical corpora. Adding
 or modifying beliefs changes IDF weights across all cases; verify all 60
 static cases still pass after any corpus modification.
-
----
 
 ## Adding Cases
 
@@ -311,8 +301,6 @@ Session cases are not independently runnable queries. Each turn depends on
 the belief state and turn history established by prior turns in the same case.
 Evaluating individual turns in isolation produces meaningless results.
 
----
-
 ## Port Assignments
 
 Each eval uses an isolated container and port to allow parallel runs:
@@ -330,8 +318,6 @@ manually before re-running:
 ```bash
 docker rm -f memory-eval-atlas
 ```
-
----
 
 ## Relationship to the Paper
 

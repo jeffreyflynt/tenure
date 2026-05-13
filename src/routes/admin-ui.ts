@@ -249,6 +249,31 @@ function render() {
           </span>
         </div>
       </div>
+      <div class="field" style="margin-top:1rem">
+        <label>Belief injection</label>
+        <div class="hint">When off, Tenure stops injecting your world model into sessions.
+        The model has no context about you. Extraction still runs unless also paused.</div>
+        <div style="display:flex;align-items:center;gap:.75rem;margin-top:.625rem">
+          <label style="position:relative;display:inline-block;width:40px;height:22px;cursor:pointer;flex-shrink:0">
+            <input type="checkbox" id="injection-enabled"
+              \${cfg.injection_enabled !== false ? "checked" : ""}
+              onchange="setInjectionEnabled(this.checked)"
+              style="opacity:0;width:0;height:0;position:absolute">
+            <span id="injection-track" style="
+              position:absolute;inset:0;border-radius:11px;transition:background .2s;
+              background:\${cfg.injection_enabled !== false ? 'var(--ok)' : 'var(--border)'};
+            "></span>
+            <span id="injection-thumb" style="
+              position:absolute;top:3px;width:16px;height:16px;border-radius:50%;
+              background:#fff;transition:transform .2s;
+              transform:translateX(\${cfg.injection_enabled !== false ? '21px' : '3px'});
+            "></span>
+          </label>
+          <span id="injection-label" style="font-size:.85rem;color:\${cfg.injection_enabled !== false ? 'var(--ok)' : 'var(--muted)'}">
+            \${cfg.injection_enabled !== false ? "Enabled" : "Paused"}
+          </span>
+        </div>
+      </div>
         </div>
         </div>
 
@@ -873,6 +898,38 @@ async function setScopeAutoDetect(enabled) {
   } catch (e) {
     toast(e.message, "error");
     const cb = document.getElementById("scope-auto-detect");
+    if (cb) cb.checked = !enabled;
+  }
+}
+
+async function setInjectionEnabled(enabled) {
+  try {
+    const res = await apiFetch("PUT", "/admin/config/injection_enabled", {
+      value: enabled,
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data?.error?.message ??  \`HTTP \${res.status} \`);
+
+    const track = document.getElementById("injection-track");
+    const thumb = document.getElementById("injection-thumb");
+    const label = document.getElementById("injection-label");
+
+    if (track) track.style.background = enabled ? "var(--ok)" : "var(--border)";
+    if (thumb) thumb.style.transform =  \`translateX(\${enabled ? "21px" : "3px"})\`;
+    if (label) {
+      label.textContent = enabled ? "Enabled" : "Paused";
+      label.style.color = enabled ? "var(--ok)" : "var(--muted)";
+    }
+
+    toast(
+      enabled
+        ? "Belief injection enabled"
+        : "Injection paused — model has no world model context. Extraction still running.",
+      "ok",
+    );
+  } catch (e) {
+    toast(e.message, "error");
+    const cb = document.getElementById("injection-enabled");
     if (cb) cb.checked = !enabled;
   }
 }

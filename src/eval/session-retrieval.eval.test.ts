@@ -377,6 +377,7 @@ test.before(async () => {
           mappings: {
             dynamic: false,
             fields: {
+              _id: { type: "token" },
               user_id: { type: "token" },
               canonical_name: {
                 type: "string",

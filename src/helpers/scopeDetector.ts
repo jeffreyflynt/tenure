@@ -1,6 +1,8 @@
 import type { Db } from "mongodb";
 import type { ProviderAdapter } from "../providers/types.js";
 import type { FastifyBaseLogger } from "fastify";
+import type { SessionPatch } from "../session/manager.js";
+import type { RuntimeConfig } from "../config/runtime.js";
 
 export interface ScopeDetectorDeps {
   db: Db;
@@ -12,6 +14,12 @@ export interface InterceptResult {
   message: string;
   newScope: string[];
 }
+
+export interface ExtractInterceptResult {
+  message: string;
+}
+
+export type CommandAction = "off" | "on" | "global-off" | "global-on";
 
 export function expandScopeHierarchy(scopes: string[]): string[] {
   const expanded = new Set<string>();
@@ -37,7 +45,6 @@ export function matchScopeCommand(content: string): string | null {
 
   for (const prefix of PREFIXES) {
     if (lower.startsWith(prefix)) {
-      // Must be followed by whitespace, comma, or end of string
       const after = trimmed.slice(prefix.length);
       if (after.length === 0 || /^[\s,]/.test(after)) {
         return after.trim();
@@ -172,5 +179,199 @@ export async function fetchExistingUserScopes(
     );
   } catch {
     return [];
+  }
+}
+
+export function matchExtractCommand(content: string): CommandAction | null {
+  const trimmed = content.trim().toLowerCase();
+
+  const COMMANDS: Record<string, CommandAction> = {
+    "!extract off": "off",
+    "!extract on": "on",
+    "!extract global off": "global-off",
+    "!extract global on": "global-on",
+  };
+
+  return COMMANDS[trimmed] ?? null;
+}
+
+export async function tryInterceptExtractCommand(
+  content: string,
+  sessionId: string,
+  userId: string,
+  deps: {
+    sessions: {
+      update: (
+        id: string,
+        userId: string,
+        patch: SessionPatch,
+      ) => Promise<unknown>;
+    };
+    runtimeStore: {
+      set: <K extends keyof RuntimeConfig>(
+        key: K,
+        value: RuntimeConfig[K],
+      ) => Promise<void>;
+    };
+  },
+  logger: FastifyBaseLogger,
+): Promise<ExtractInterceptResult | null> {
+  const action = matchExtractCommand(content);
+  if (action === null) return null;
+
+  switch (action) {
+    case "off":
+      try {
+        await deps.sessions.update(sessionId, userId, {
+          extractionPaused: true,
+        });
+      } catch (err) {
+        logger.warn(
+          { err, sessionId },
+          "extract command: session update failed",
+        );
+        return { message: "Failed to pause extraction. Try again." };
+      }
+      return {
+        message:
+          "Extraction paused for this session. Existing beliefs are still injected. " +
+          "Send `!extract on` to resume, or `!extract global off` to disable permanently.",
+      };
+
+    case "on":
+      try {
+        await deps.sessions.update(sessionId, userId, {
+          extractionPaused: false,
+        });
+      } catch (err) {
+        logger.warn(
+          { err, sessionId },
+          "extract command: session update failed",
+        );
+        return { message: "Failed to resume extraction. Try again." };
+      }
+      return { message: "Extraction resumed for this session." };
+
+    case "global-off":
+      try {
+        await deps.runtimeStore.set("extraction_enabled", false);
+      } catch (err) {
+        logger.warn({ err }, "extract command: global disable failed");
+        return { message: "Failed to disable extraction globally. Try again." };
+      }
+      return {
+        message:
+          "Extraction disabled globally. No new beliefs will be extracted from any session. " +
+          "Existing beliefs are still injected. Send `!extract global on` to re-enable.",
+      };
+
+    case "global-on":
+      try {
+        await deps.runtimeStore.set("extraction_enabled", true);
+      } catch (err) {
+        logger.warn({ err }, "extract command: global enable failed");
+        return {
+          message: "Failed to re-enable extraction globally. Try again.",
+        };
+      }
+      return { message: "Extraction re-enabled globally." };
+  }
+}
+
+export function matchInjectCommand(content: string): CommandAction | null {
+  const trimmed = content.trim().toLowerCase();
+
+  const COMMANDS: Record<string, CommandAction> = {
+    "!inject off": "off",
+    "!inject on": "on",
+    "!inject global off": "global-off",
+    "!inject global on": "global-on",
+  };
+
+  return COMMANDS[trimmed] ?? null;
+}
+
+export async function tryInterceptInjectCommand(
+  content: string,
+  sessionId: string,
+  userId: string,
+  deps: {
+    sessions: {
+      update: (
+        id: string,
+        userId: string,
+        patch: SessionPatch,
+      ) => Promise<unknown>;
+    };
+    runtimeStore: {
+      set: <K extends keyof RuntimeConfig>(
+        key: K,
+        value: RuntimeConfig[K],
+      ) => Promise<void>;
+    };
+  },
+  logger: FastifyBaseLogger,
+): Promise<ExtractInterceptResult | null> {
+  const action = matchInjectCommand(content);
+  if (action === null) return null;
+
+  switch (action) {
+    case "off":
+      try {
+        await deps.sessions.update(sessionId, userId, {
+          injectionPaused: true,
+        });
+      } catch (err) {
+        logger.warn(
+          { err, sessionId },
+          "inject command: session update failed",
+        );
+        return { message: "Failed to pause injection. Try again." };
+      }
+      return {
+        message:
+          "Belief injection paused for this session. " +
+          "Tenure is still extracting from this conversation — send `!extract off` too if you want a fully clean session. " +
+          "Send `!inject on` to resume.",
+      };
+
+    case "on":
+      try {
+        await deps.sessions.update(sessionId, userId, {
+          injectionPaused: false,
+        });
+      } catch (err) {
+        logger.warn(
+          { err, sessionId },
+          "inject command: session update failed",
+        );
+        return { message: "Failed to resume injection. Try again." };
+      }
+      return { message: "Belief injection resumed for this session." };
+
+    case "global-off":
+      try {
+        await deps.runtimeStore.set("injection_enabled", false);
+      } catch (err) {
+        logger.warn({ err }, "inject command: global disable failed");
+        return { message: "Failed to disable injection globally. Try again." };
+      }
+      return {
+        message:
+          "Belief injection disabled globally. " +
+          "The model will receive no context from your world model in any session. " +
+          "Send `!inject global on` to re-enable.",
+      };
+
+    case "global-on":
+      try {
+        await deps.runtimeStore.set("injection_enabled", true);
+      } catch (err) {
+        logger.warn({ err }, "inject command: global enable failed");
+        return {
+          message: "Failed to re-enable injection globally. Try again.",
+        };
+      }
+      return { message: "Belief injection re-enabled globally." };
   }
 }

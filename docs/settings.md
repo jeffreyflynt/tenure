@@ -32,11 +32,46 @@ See [providers.md](providers.md) for the supported model list.
 
 ## Extraction
 
-Toggles whether Tenure extracts new beliefs from conversations.
+Tenure learns about you by extracting beliefs from your conversations. This
+happens asynchronously after every response, so it never blocks your session.
+Extraction can be controlled at three levels, from broadest to narrowest:
 
-When **off**, Tenure still injects your existing beliefs into every session: your world model is still active, it just stops growing from new conversations. Use this for sessions you don't want recorded, or to pause extraction while you clean up your belief store.
+### Global toggle
 
-Extraction can also be paused for a single request without touching this setting, by passing the header `X-Tenure-No-Extract: true` from your client.
+The toggle in Settings pauses extraction everywhere. When off, Tenure still
+injects your existing beliefs into every session, your world model stays
+active, it just stops growing. Use this when you want a clean break, or while
+you clean up your belief store before re-enabling.
+
+### Session-level commands
+
+You can pause and resume extraction from within any chat session without
+touching Settings:
+
+| Command               | Effect                                                     |
+| --------------------- | ---------------------------------------------------------- |
+| `!extract off`        | Pauses extraction for this session only                    |
+| `!extract on`         | Resumes extraction for this session                        |
+| `!extract global off` | Pauses extraction everywhere (same as the Settings toggle) |
+| `!extract global on`  | Re-enables extraction everywhere                           |
+
+When you send `!extract off`, Tenure responds with a confirmation. Your
+existing beliefs are still injected into that session, the model still
+knows your context, it just stops recording new things you say.
+
+**On session boundaries**: `!extract off` persists until you explicitly send
+`!extract on`, or until your client starts a session with a new session ID.
+If your client reuses session IDs across conversations, the pause will carry
+over. Send `!extract on` to re-enable when you're ready.
+
+### What "paused" means in practice
+
+Pausing extraction does not make Tenure forget anything. It does not clear
+your world model or stop belief injection. The only thing that stops is the
+extraction worker writing new beliefs from that session's exchanges. Think
+of it as the difference between working with a colleague who remembers
+everything you've told them, versus one who is also taking notes. Paused
+means no new notes.
 
 ## Scope
 

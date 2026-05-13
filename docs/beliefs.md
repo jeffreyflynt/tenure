@@ -60,7 +60,10 @@ Pinned beliefs are always injected regardless of query signal. Use pinning for f
 
 Beliefs are created in three ways:
 
-1. **Extraction:** The sidecar worker reads every exchange and writes new beliefs asynchronously after the response is returned.
+1. **Extraction:** The sidecar worker reads every exchange and writes new
+   beliefs asynchronously after the response is returned. You can pause
+   extraction globally from Settings, or for a single session by sending
+   `!extract off` in your chat client.
 2. **Onboarding:** The onboarding flow at `http://localhost:5757/onboarding` seeds your world model from a short questionnaire.
 3. **Manual authoring:** You can create and edit beliefs directly from the dashboard at any time.
    _For a full account of how retrieval works, see [retrieval.md](retrieval.md)._

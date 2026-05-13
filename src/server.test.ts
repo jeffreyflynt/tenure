@@ -50,7 +50,6 @@ function makeDeps(overrides: Partial<ServerDeps> = {}): ServerDeps {
     history: new HistoryManager(db),
     context: new ContextBuilder(
       {
-        listAlwaysOn: sinon.stub().resolves([]),
         listByScope: sinon.stub().resolves([]),
         listPinnedFacts: sinon.stub().resolves([]),
         listPinnedOpenQuestions: sinon.stub().resolves([]),

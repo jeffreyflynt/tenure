@@ -37,6 +37,12 @@ export class AnthropicAdapter implements ProviderAdapter {
     req: NormalizedRequest,
     systemPrompt: SystemPrompt,
   ): Promise<NormalizedResponse> {
+    if (!req.model) {
+      throw new Error(
+        "No model specified — select a model in your client settings.",
+      );
+    }
+
     const base = this.buildCallParams(req, systemPrompt);
 
     let response: Anthropic.Message;
@@ -68,6 +74,12 @@ export class AnthropicAdapter implements ProviderAdapter {
     req: NormalizedRequest,
     systemPrompt: SystemPrompt,
   ): AsyncGenerator<StreamEvent> {
+    if (!req.model) {
+      throw new Error(
+        "No model specified — select a model in your client settings.",
+      );
+    }
+
     const base = this.buildCallParams(req, systemPrompt);
     const stream = this.client.messages.stream(base);
 
@@ -79,6 +91,10 @@ export class AnthropicAdapter implements ProviderAdapter {
         ) {
           yield { type: "content_delta", delta: event.delta.text };
         }
+        // input_json_delta (tool call argument chunks) are intentionally not
+        // yielded here — tool calls are surfaced in full via the stream_end
+        // event below, assembled from finalMessage(). If you need streaming
+        // tool call deltas, handle event.delta.type === "input_json_delta" here.
       }
 
       const final = await stream.finalMessage();
@@ -105,7 +121,10 @@ export class AnthropicAdapter implements ProviderAdapter {
         created: Math.floor(new Date(m.created_at).getTime() / 1000),
         owned_by: "anthropic",
       }));
-    } catch {
+    } catch (e) {
+      // Surface auth failures so the user knows their key is wrong rather
+      // than silently returning an empty model list with no feedback.
+      if (e instanceof Anthropic.AuthenticationError) throw mapError(e);
       return [];
     }
   }
@@ -165,8 +184,7 @@ export class AnthropicAdapter implements ProviderAdapter {
     return {
       model: req.model,
       messages: conversation,
-      max_tokens: req.max_tokens ?? 4096,
-      cache_control: { type: "ephemeral" as const },
+      max_tokens: req.max_tokens ?? 8192,
       ...(system !== undefined ? { system } : {}),
       ...(req.temperature !== undefined
         ? { temperature: req.temperature }
@@ -258,7 +276,67 @@ function toContentBlock(part: ContentPart): Anthropic.ContentBlockParam {
     return { type: "image", source: { type: "url", url } };
   }
 
-  return { type: "text", text: "[attached file]" };
+  if (part.type === "file") {
+    const { url, name } = part.file;
+
+    if (url.startsWith("data:")) {
+      const [header, data] = url.split(",");
+      const rawType =
+        header.split(":")[1]?.split(";")[0] ?? "application/octet-stream";
+      const validatedType = mapToAnthropicDocumentType(rawType);
+
+      if (!validatedType) {
+        console.warn(
+          `[AnthropicAdapter] Unsupported file MIME type "${rawType}" for "${name ?? "unknown"}"; dropping file.`,
+        );
+        return {
+          type: "text",
+          text: name ? `[unsupported file: ${name}]` : "[unsupported file]",
+        };
+      }
+
+      return {
+        type: "document",
+        source: {
+          type: "base64",
+          media_type: validatedType,
+          data,
+        },
+        ...(name ? { title: name } : {}),
+      } as Anthropic.ContentBlockParam;
+    }
+
+    console.warn(
+      `[AnthropicAdapter] Non-data-URL file reference dropped: "${name ?? url}"`,
+    );
+    return {
+      type: "text",
+      text: name ? `[file reference: ${name}]` : "[file reference]",
+    };
+  }
+
+  return { type: "text", text: "[unsupported content part]" };
+}
+
+function mapToAnthropicDocumentType(mimeType: string): string | null {
+  const supported = [
+    "application/pdf",
+    "text/plain",
+    "text/html",
+    "text/css",
+    "text/javascript",
+    "application/javascript",
+    "text/typescript",
+    "text/markdown",
+    "text/csv",
+    "application/json",
+    "application/xml",
+    "text/xml",
+  ];
+
+  if (supported.includes(mimeType)) return mimeType;
+  if (mimeType.startsWith("text/")) return mimeType;
+  return null;
 }
 
 function translateTools(
