@@ -30,6 +30,8 @@ export interface PersonaGeneratorDeps {
 }
 
 export class PersonaSummaryService {
+  private readonly inFlight = new Map<string, Promise<void>>();
+
   constructor(private readonly deps: PersonaGeneratorDeps) {}
 
   async ensureFresh(
@@ -53,16 +55,41 @@ export class PersonaSummaryService {
     universalBeliefs?: Belief[],
     hash?: string,
   ): Promise<void> {
+    const existing = this.inFlight.get(userId);
+    if (existing) {
+      await existing;
+      return;
+    }
+
+    const task = this.doRegenerate(userId, universalBeliefs, hash);
+    this.inFlight.set(userId, task);
+
+    try {
+      await task;
+    } finally {
+      this.inFlight.delete(userId);
+    }
+  }
+
+  private async doRegenerate(
+    userId: string,
+    universalBeliefs?: Belief[],
+    hash?: string,
+  ): Promise<void> {
     const loaded =
       universalBeliefs === undefined
         ? await this.loadContributing(userId)
         : { universalBeliefs };
 
     const digest = hash ?? this.hash(loaded.universalBeliefs);
-    const universal = await this.callLLM(loaded.universalBeliefs);
 
     const existing = await this.deps.cache.get(userId);
     if (existing?.beliefs_hash === digest) return;
+
+    const universal = await this.callLLM(loaded.universalBeliefs);
+
+    const recheck = await this.deps.cache.get(userId);
+    if (recheck?.beliefs_hash === digest) return;
 
     const doc: PersonaDoc = {
       _id: userId,

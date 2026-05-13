@@ -102,6 +102,7 @@ const SEARCH_INDEXES: SearchIndexMeta[] = [
       mappings: {
         dynamic: false,
         fields: {
+          _id: { type: "token" },
           user_id: { type: "token" },
           canonical_name: {
             type: "string",
@@ -127,7 +128,6 @@ const SEARCH_INDEXES: SearchIndexMeta[] = [
               },
             },
           },
-          content: { type: "string", analyzer: "lucene.english" },
           superseded_by: { type: "token" },
           resolved_at: { type: "date" },
           type: { type: "token" },
@@ -192,7 +192,7 @@ export async function ensureIndexes(cols: Collections): Promise<void> {
 
   await cols.jobs.createIndexes([
     {
-      key: { status: 1, run_after: 1 },
+      key: { status: 1, run_after: 1, created_at: 1 },
       partialFilterExpression: { status: "pending" },
     },
     { key: { turn_id: 1, status: 1 } },

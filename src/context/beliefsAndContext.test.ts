@@ -185,7 +185,24 @@ function makeReader(
 ): BeliefsReader {
   const stub = {
     listPinnedFacts: sinon.stub().resolves(pinnedFacts),
-    searchText: sinon.stub().resolves(relevant),
+    searchText: sinon
+      .stub()
+      .callsFake(
+        (
+          _userId: string,
+          _query: string,
+          _scope: string[] | undefined,
+          opts?: { excludeIds?: Set<string> },
+        ) => {
+          const excludeIds = opts?.excludeIds;
+          if (excludeIds?.size) {
+            return Promise.resolve(
+              relevant.filter((b) => !excludeIds.has(b._id)),
+            );
+          }
+          return Promise.resolve(relevant);
+        },
+      ),
     listPinnedOpenQuestions: sinon.stub().resolves(questions),
     listAlwaysOn: sinon.stub().resolves([]),
     listByScope: sinon.stub().resolves([]),
@@ -195,12 +212,10 @@ function makeReader(
 
 function makePersonaStub(
   universal = "You prefer direct answers.",
-  per_scope: Record<string, string> = {},
 ): PersonaCache {
   const doc: PersonaDoc = {
     _id: "user-1",
     universal,
-    per_scope,
     contributing_belief_ids: [],
     beliefs_hash: "x",
     generated_at: new Date(),

@@ -7,8 +7,28 @@ export interface SplitResult {
   parseStatus: "parsed" | "needs_repair" | "missing";
 }
 
+const SIDECAR_FENCE_RE = /^```[^\n]*\n([\s\S]*?)\n```$/m;
+
+function unwrapSidecarFence(content: string): string {
+  return content.replace(SIDECAR_FENCE_RE, (match, inner: string) => {
+    if (inner.includes("SIDECAR_JSON") || inner.includes("END_SIDECAR")) {
+      return inner;
+    }
+    return match;
+  });
+}
+
+function normalizeMarkers(content: string): string {
+  return content
+    .replace(/<<<\s*SIDECAR_JSON\s*>>>/g, SIDECAR_BEGIN)
+    .replace(/<<<\s*END_SIDECAR\s*>>>/g, SIDECAR_END);
+}
+
 export function splitSidecar(content: string): SplitResult {
-  const beginIdx = content.lastIndexOf(SIDECAR_BEGIN);
+  const unwrapped = unwrapSidecarFence(content);
+  const normalized = normalizeMarkers(unwrapped);
+
+  const beginIdx = normalized.lastIndexOf(SIDECAR_BEGIN);
   if (beginIdx === -1)
     return {
       visible: content.trimEnd(),
@@ -17,12 +37,12 @@ export function splitSidecar(content: string): SplitResult {
     };
 
   const afterBegin = beginIdx + SIDECAR_BEGIN.length;
-  const endIdx = content.indexOf(SIDECAR_END, afterBegin);
-  const visible = content.slice(0, beginIdx).trimEnd();
+  const endIdx = normalized.indexOf(SIDECAR_END, afterBegin);
+  const visible = normalized.slice(0, beginIdx).trimEnd();
   const sidecarRaw =
     endIdx === -1
-      ? content.slice(afterBegin).trim()
-      : content.slice(afterBegin, endIdx).trim();
+      ? normalized.slice(afterBegin).trim()
+      : normalized.slice(afterBegin, endIdx).trim();
 
   return {
     visible,

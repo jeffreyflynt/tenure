@@ -72,23 +72,26 @@ export class ContextBuilder {
     const { query: expandedQuery, wasNoisy: queryWasNoisy } =
       buildSearchQuery(query);
 
-    const [personaDoc, pinnedFacts, rawSearchResults, questions] =
-      await Promise.all([
-        this.persona.get(userId),
-        this.reader.listPinnedFacts(userId, scope, this.budget.maxPinnedFacts),
-        expandedQuery
-          ? this.reader.searchText(userId, expandedQuery, scope, {
-              limit: this.budget.maxBeliefs,
-              minScore: 3,
-              scoreDetails: this.budget.scoreDetails,
-            })
-          : Promise.resolve([] as ScoredBelief[]),
-        this.reader.listPinnedOpenQuestions(
-          userId,
-          scope,
-          this.budget.maxQuestions,
-        ),
-      ]);
+    const [personaDoc, pinnedFacts, questions] = await Promise.all([
+      this.persona.get(userId),
+      this.reader.listPinnedFacts(userId, scope, this.budget.maxPinnedFacts),
+      this.reader.listPinnedOpenQuestions(
+        userId,
+        scope,
+        this.budget.maxQuestions,
+      ),
+    ]);
+
+    const pinnedIds = new Set(pinnedFacts.map((b) => b._id));
+
+    const rawSearchResults = expandedQuery
+      ? await this.reader.searchText(userId, expandedQuery, scope, {
+          limit: this.budget.maxBeliefs,
+          minScore: 3,
+          scoreDetails: this.budget.scoreDetails,
+          excludeIds: pinnedIds,
+        })
+      : ([] as ScoredBelief[]);
 
     const searchScores: BeliefScore[] = rawSearchResults.map((b) => ({
       id: b._id as string,
@@ -101,12 +104,7 @@ export class ContextBuilder {
       this.budget.maxPersonaChars,
     );
 
-    const pinnedIds = new Set(pinnedFacts.map((b) => b._id));
-    const relevantDeduped = rawSearchResults.filter(
-      (b) => !pinnedIds.has(b._id),
-    );
-
-    const combined = [...pinnedFacts, ...relevantDeduped];
+    const combined = [...pinnedFacts, ...rawSearchResults];
     const cap = this.budget.maxBeliefs;
     const truncated = combined.length > cap;
     const capped = combined.slice(0, cap);
@@ -178,25 +176,18 @@ export class ContextBuilder {
       content: this.truncate(b.content),
       why_it_matters: b.why_it_matters,
     };
-    // type only carries instruction value for open_question
-    // preference and entity are self-evident from context
     if (b.type === "open_question" || b.type === "decision") {
       out.type = b.type;
     }
-
-    // Only surface epistemic signal when it's not the default
     if (b.epistemic_status !== "active") {
       out.epistemic_status = b.epistemic_status;
     }
-    // Only surface confidence when it should affect LLM weighting
     if (b.confidence < 0.65) {
       out.confidence = b.confidence;
     }
-
     if (isSearchResult && b.aliases?.length) {
       out.aliases = b.aliases;
     }
-
     return out;
   }
 

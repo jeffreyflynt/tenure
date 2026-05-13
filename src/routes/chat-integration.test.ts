@@ -110,7 +110,6 @@ async function buildApp(
   const history = new HistoryManager(db);
   const context = new ContextBuilder(
     {
-      listAlwaysOn: sinon.stub().resolves([]),
       listByScope: sinon.stub().resolves([]),
       listPinnedOpenQuestions: sinon.stub().resolves([]),
     } as any,
@@ -472,7 +471,6 @@ test("auto-binds unbound session and returns 200", async (t) => {
     history: new HistoryManager(db),
     context: new ContextBuilder(
       {
-        listAlwaysOn: sinon.stub().resolves([]),
         listByScope: sinon.stub().resolves([]),
         listPinnedOpenQuestions: sinon.stub().resolves([]),
       } as any,
@@ -533,7 +531,6 @@ test("returns 502 when provider is not registered", async (t) => {
     history: new HistoryManager(db),
     context: new ContextBuilder(
       {
-        listAlwaysOn: sinon.stub().resolves([]),
         listByScope: sinon.stub().resolves([]),
         listPinnedOpenQuestions: sinon.stub().resolves([]),
       } as any,
@@ -585,7 +582,6 @@ test("scope from metadata takes precedence over session activeScope", async (t) 
     history: new HistoryManager(db),
     context: new ContextBuilder(
       {
-        listAlwaysOn: sinon.stub().resolves([]),
         listByScope: sinon.stub().resolves([]),
         listPinnedOpenQuestions: sinon.stub().resolves([]),
       } as any,
@@ -638,7 +634,6 @@ test("falls back to session activeScope when metadata scope is absent", async (t
     history: new HistoryManager(db),
     context: new ContextBuilder(
       {
-        listAlwaysOn: sinon.stub().resolves([]),
         listByScope: sinon.stub().resolves([]),
         listPinnedOpenQuestions: sinon.stub().resolves([]),
       } as any,
@@ -1329,7 +1324,6 @@ test("!scope command updates session activeScope", async (t) => {
     history: new HistoryManager(db),
     context: new ContextBuilder(
       {
-        listAlwaysOn: sinon.stub().resolves([]),
         listByScope: sinon.stub().resolves([]),
         listPinnedOpenQuestions: sinon.stub().resolves([]),
       } as any,
@@ -1473,7 +1467,6 @@ test("scope command mid-session changes scope for subsequent turn", async (t) =>
     history: new HistoryManager(db),
     context: new ContextBuilder(
       {
-        listAlwaysOn: sinon.stub().resolves([]),
         listByScope: sinon.stub().resolves([]),
         listPinnedOpenQuestions: sinon.stub().resolves([]),
       } as any,
@@ -1555,7 +1548,6 @@ test("first-turn scope detection runs when scopeDetector is configured and activ
     history: new HistoryManager(db),
     context: new ContextBuilder(
       {
-        listAlwaysOn: sinon.stub().resolves([]),
         listByScope: sinon.stub().resolves([]),
         listPinnedOpenQuestions: sinon.stub().resolves([]),
       } as any,
@@ -1633,7 +1625,6 @@ test("first-turn scope detection does not run when activeScope is already set", 
     history: new HistoryManager(db),
     context: new ContextBuilder(
       {
-        listAlwaysOn: sinon.stub().resolves([]),
         listByScope: sinon.stub().resolves([]),
         listPinnedOpenQuestions: sinon.stub().resolves([]),
       } as any,
@@ -1691,7 +1682,6 @@ test("first-turn scope detection does not run when scopeDetector is not configur
     history: new HistoryManager(db),
     context: new ContextBuilder(
       {
-        listAlwaysOn: sinon.stub().resolves([]),
         listByScope: sinon.stub().resolves([]),
         listPinnedOpenQuestions: sinon.stub().resolves([]),
       } as any,
@@ -1745,7 +1735,6 @@ test("first-turn scope detection failure degrades gracefully and still returns r
     history: new HistoryManager(db),
     context: new ContextBuilder(
       {
-        listAlwaysOn: sinon.stub().resolves([]),
         listByScope: sinon.stub().resolves([]),
         listPinnedOpenQuestions: sinon.stub().resolves([]),
       } as any,
@@ -1811,7 +1800,6 @@ test("first-turn scope detection only fires on turnCounter 0", async (t) => {
     history: new HistoryManager(db),
     context: new ContextBuilder(
       {
-        listAlwaysOn: sinon.stub().resolves([]),
         listByScope: sinon.stub().resolves([]),
         listPinnedOpenQuestions: sinon.stub().resolves([]),
       } as any,
@@ -1852,4 +1840,861 @@ test("first-turn scope detection only fires on turnCounter 0", async (t) => {
   );
 
   t.is(detectorCall.callCount, 1);
+});
+
+test("!extract off returns synthetic acknowledgment without calling LLM", async (t) => {
+  const adapter = makeStubAdapter(
+    makeProviderResponse("Should not be called."),
+  );
+  const { app } = await buildApp(adapter);
+
+  const res = await post(app, {
+    messages: [{ role: "user", content: "!extract off" }],
+  });
+
+  t.is(res.statusCode, 200);
+  const body = JSON.parse(res.body);
+  t.is(body.object, "chat.completion");
+  t.is(body.choices[0].finish_reason, "stop");
+  t.false((adapter.call as sinon.SinonStub).called);
+});
+
+test("!extract off does not write a turn to history", async (t) => {
+  const { app } = await buildApp(makeProviderResponse("Unused."));
+
+  await post(app, {
+    messages: [{ role: "user", content: "!extract off" }],
+  });
+
+  await new Promise((r) => setTimeout(r, 150));
+
+  const turn = await db.collection("turns").findOne({
+    sessionId: SESSION_ID,
+    userMessage: "!extract off",
+  });
+  t.is(turn, null);
+});
+
+test("!extract off does not enqueue an extraction job", async (t) => {
+  const { app } = await buildApp(makeProviderResponse("Unused."));
+
+  await post(app, {
+    messages: [{ role: "user", content: "!extract off" }],
+  });
+
+  await new Promise((r) => setTimeout(r, 150));
+
+  const job = await db.collection("jobs").findOne({
+    "payload.user_message": "!extract off",
+  });
+  t.is(job, null);
+});
+
+test("!extract off sets extractionPaused on session", async (t) => {
+  const sessions = new SessionManager(db);
+  await sessions.getOrCreate("sess-extract-off", USER_ID);
+  await sessions.update("sess-extract-off", USER_ID, {
+    providerId: PROVIDER_ID,
+    model: MODEL,
+  });
+
+  const registry = new ProviderRegistry();
+  registry.register(makeStubAdapter(makeProviderResponse("Unused.")));
+
+  const app = Fastify();
+  registerChatRoute(app, {
+    sessions,
+    history: new HistoryManager(db),
+    context: new ContextBuilder(
+      {
+        listByScope: sinon.stub().resolves([]),
+        listPinnedOpenQuestions: sinon.stub().resolves([]),
+      } as any,
+      { get: sinon.stub().resolves(null) } as any,
+    ),
+    providers: registry,
+    jobs: new ExtractionJobQueue(db),
+    userId: USER_ID,
+    extractionWorker: {
+      processById: sinon.stub().resolves(),
+      sweep: sinon.stub().resolves(0),
+    } as unknown as ExtractionWorker,
+    runtimeStore: {
+      load: sinon.stub().resolves({ extraction_enabled: true }),
+      set: sinon.stub().resolves(),
+    } as unknown as RuntimeConfigStore,
+    errorLogger: {
+      log: sinon.stub().resolves(),
+    } as unknown as ErrorLogger,
+  });
+  await app.ready();
+
+  await post(
+    app,
+    { messages: [{ role: "user", content: "!extract off" }] },
+    { "x-session-id": "sess-extract-off" },
+  );
+
+  const updated = await sessions.get("sess-extract-off", USER_ID);
+  t.true((updated as any).extractionPaused);
+});
+
+test("!extract on clears extractionPaused on session", async (t) => {
+  const sessions = new SessionManager(db);
+  await sessions.getOrCreate("sess-extract-on", USER_ID);
+  await sessions.update("sess-extract-on", USER_ID, {
+    providerId: PROVIDER_ID,
+    model: MODEL,
+    extractionPaused: true,
+  } as any);
+
+  const registry = new ProviderRegistry();
+  registry.register(makeStubAdapter(makeProviderResponse("Unused.")));
+
+  const app = Fastify();
+  registerChatRoute(app, {
+    sessions,
+    history: new HistoryManager(db),
+    context: new ContextBuilder(
+      {
+        listByScope: sinon.stub().resolves([]),
+        listPinnedOpenQuestions: sinon.stub().resolves([]),
+      } as any,
+      { get: sinon.stub().resolves(null) } as any,
+    ),
+    providers: registry,
+    jobs: new ExtractionJobQueue(db),
+    userId: USER_ID,
+    extractionWorker: {
+      processById: sinon.stub().resolves(),
+      sweep: sinon.stub().resolves(0),
+    } as unknown as ExtractionWorker,
+    runtimeStore: {
+      load: sinon.stub().resolves({ extraction_enabled: true }),
+      set: sinon.stub().resolves(),
+    } as unknown as RuntimeConfigStore,
+    errorLogger: {
+      log: sinon.stub().resolves(),
+    } as unknown as ErrorLogger,
+  });
+  await app.ready();
+
+  await post(
+    app,
+    { messages: [{ role: "user", content: "!extract on" }] },
+    { "x-session-id": "sess-extract-on" },
+  );
+
+  const updated = await sessions.get("sess-extract-on", USER_ID);
+  t.false((updated as any).extractionPaused);
+});
+
+test("!extract global off calls runtimeStore.set with extraction_enabled false", async (t) => {
+  const runtimeSet = sinon.stub().resolves();
+  const adapter = makeStubAdapter(makeProviderResponse("Unused."));
+  const registry = new ProviderRegistry();
+  registry.register(adapter);
+
+  const app = Fastify();
+  registerChatRoute(app, {
+    sessions: new SessionManager(db),
+    history: new HistoryManager(db),
+    context: new ContextBuilder(
+      {
+        listByScope: sinon.stub().resolves([]),
+        listPinnedOpenQuestions: sinon.stub().resolves([]),
+      } as any,
+      { get: sinon.stub().resolves(null) } as any,
+    ),
+    providers: registry,
+    jobs: new ExtractionJobQueue(db),
+    userId: USER_ID,
+    extractionWorker: {
+      processById: sinon.stub().resolves(),
+      sweep: sinon.stub().resolves(0),
+    } as unknown as ExtractionWorker,
+    runtimeStore: {
+      load: sinon.stub().resolves({ extraction_enabled: true }),
+      set: runtimeSet,
+    } as unknown as RuntimeConfigStore,
+    errorLogger: {
+      log: sinon.stub().resolves(),
+    } as unknown as ErrorLogger,
+  });
+  await app.ready();
+
+  await db.collection("sessions").deleteMany({ _id: "sess-global-extract" });
+  const sessions = new SessionManager(db);
+  await sessions.getOrCreate("sess-global-extract", USER_ID);
+  await sessions.update("sess-global-extract", USER_ID, {
+    providerId: PROVIDER_ID,
+    model: MODEL,
+  });
+
+  const res = await post(
+    app,
+    { messages: [{ role: "user", content: "!extract global off" }] },
+    { "x-session-id": "sess-global-extract" },
+  );
+
+  t.is(res.statusCode, 200);
+  t.true(runtimeSet.calledWith("extraction_enabled", false));
+  t.false((adapter.call as sinon.SinonStub).called);
+});
+
+test("!extract command tenure parse_status is missing since no LLM fired", async (t) => {
+  const { app } = await buildApp(makeProviderResponse("Unused."));
+
+  const res = await post(app, {
+    messages: [{ role: "user", content: "!extract off" }],
+  });
+
+  const body = JSON.parse(res.body);
+  t.is(body.tenure.parse_status, "missing");
+});
+
+test("!extract command tenure degraded is false", async (t) => {
+  const { app } = await buildApp(makeProviderResponse("Unused."));
+
+  const res = await post(app, {
+    messages: [{ role: "user", content: "!extract off" }],
+  });
+
+  const body = JSON.parse(res.body);
+  t.false(body.tenure.degraded);
+});
+
+test("extraction worker NOT called on subsequent turn when session extractionPaused is true", async (t) => {
+  const sessions = new SessionManager(db);
+  await sessions.getOrCreate("sess-paused-extract", USER_ID);
+  await sessions.update("sess-paused-extract", USER_ID, {
+    providerId: PROVIDER_ID,
+    model: MODEL,
+    extractionPaused: true,
+  } as any);
+
+  const adapter = makeStubAdapter(makeProviderResponse("Normal reply."));
+  const registry = new ProviderRegistry();
+  registry.register(adapter);
+  const extractionWorker = {
+    processById: sinon.stub().resolves(),
+    sweep: sinon.stub().resolves(0),
+  };
+
+  const app = Fastify();
+  registerChatRoute(app, {
+    sessions,
+    history: new HistoryManager(db),
+    context: new ContextBuilder(
+      {
+        listByScope: sinon.stub().resolves([]),
+        listPinnedOpenQuestions: sinon.stub().resolves([]),
+      } as any,
+      { get: sinon.stub().resolves(null) } as any,
+    ),
+    providers: registry,
+    jobs: new ExtractionJobQueue(db),
+    userId: USER_ID,
+    extractionWorker: extractionWorker as unknown as ExtractionWorker,
+    runtimeStore: {
+      load: sinon.stub().resolves({ extraction_enabled: true }),
+      set: sinon.stub().resolves(),
+    } as unknown as RuntimeConfigStore,
+    errorLogger: {
+      log: sinon.stub().resolves(),
+    } as unknown as ErrorLogger,
+  });
+  await app.ready();
+
+  const res = await post(
+    app,
+    { messages: [{ role: "user", content: "Normal question" }] },
+    { "x-session-id": "sess-paused-extract" },
+  );
+
+  t.is(res.statusCode, 200);
+  await new Promise((r) => setTimeout(r, 100));
+  t.false(extractionWorker.processById.called);
+});
+
+test("turn still persisted on subsequent turn when session extractionPaused is true", async (t) => {
+  const sessions = new SessionManager(db);
+  await sessions.getOrCreate("sess-paused-persist", USER_ID);
+  await sessions.update("sess-paused-persist", USER_ID, {
+    providerId: PROVIDER_ID,
+    model: MODEL,
+    extractionPaused: true,
+  } as any);
+
+  const registry = new ProviderRegistry();
+  registry.register(makeStubAdapter(makeProviderResponse("Stored.")));
+
+  const app = Fastify();
+  registerChatRoute(app, {
+    sessions,
+    history: new HistoryManager(db),
+    context: new ContextBuilder(
+      {
+        listByScope: sinon.stub().resolves([]),
+        listPinnedOpenQuestions: sinon.stub().resolves([]),
+      } as any,
+      { get: sinon.stub().resolves(null) } as any,
+    ),
+    providers: registry,
+    jobs: new ExtractionJobQueue(db),
+    userId: USER_ID,
+    extractionWorker: {
+      processById: sinon.stub().resolves(),
+      sweep: sinon.stub().resolves(0),
+    } as unknown as ExtractionWorker,
+    runtimeStore: {
+      load: sinon.stub().resolves({ extraction_enabled: true }),
+      set: sinon.stub().resolves(),
+    } as unknown as RuntimeConfigStore,
+    errorLogger: {
+      log: sinon.stub().resolves(),
+    } as unknown as ErrorLogger,
+  });
+  await app.ready();
+
+  await post(
+    app,
+    { messages: [{ role: "user", content: "Store this anyway" }] },
+    { "x-session-id": "sess-paused-persist" },
+  );
+
+  const turn = await waitForDoc(db.collection("turns"), {
+    sessionId: "sess-paused-persist",
+    userMessage: "Store this anyway",
+  });
+  t.truthy(turn);
+  t.is(turn!.assistantMessage, "Stored.");
+});
+
+test("streaming: !extract off returns non-streaming JSON even when stream:true", async (t) => {
+  const events = streamEvents(["Should not appear."]);
+  const { app } = await buildApp(makeStreamAdapter(events));
+
+  const res = await post(app, {
+    stream: true,
+    messages: [{ role: "user", content: "!extract off" }],
+  });
+
+  t.is(res.statusCode, 200);
+  t.not(res.headers["content-type"], "text/event-stream");
+  const body = JSON.parse(res.body);
+  t.is(body.object, "chat.completion");
+});
+
+test("!inject off returns synthetic acknowledgment without calling LLM", async (t) => {
+  const adapter = makeStubAdapter(
+    makeProviderResponse("Should not be called."),
+  );
+  const { app } = await buildApp(adapter);
+
+  const res = await post(app, {
+    messages: [{ role: "user", content: "!inject off" }],
+  });
+
+  t.is(res.statusCode, 200);
+  const body = JSON.parse(res.body);
+  t.is(body.object, "chat.completion");
+  t.is(body.choices[0].finish_reason, "stop");
+  t.false((adapter.call as sinon.SinonStub).called);
+});
+
+test("!inject off does not write a turn to history", async (t) => {
+  const { app } = await buildApp(makeProviderResponse("Unused."));
+
+  await post(app, {
+    messages: [{ role: "user", content: "!inject off" }],
+  });
+
+  await new Promise((r) => setTimeout(r, 150));
+
+  const turn = await db.collection("turns").findOne({
+    sessionId: SESSION_ID,
+    userMessage: "!inject off",
+  });
+  t.is(turn, null);
+});
+
+test("!inject off does not enqueue an extraction job", async (t) => {
+  const { app } = await buildApp(makeProviderResponse("Unused."));
+
+  await post(app, {
+    messages: [{ role: "user", content: "!inject off" }],
+  });
+
+  await new Promise((r) => setTimeout(r, 150));
+
+  const job = await db.collection("jobs").findOne({
+    "payload.user_message": "!inject off",
+  });
+  t.is(job, null);
+});
+
+test("!inject off sets injectionPaused on session", async (t) => {
+  const sessions = new SessionManager(db);
+  await sessions.getOrCreate("sess-inject-off", USER_ID);
+  await sessions.update("sess-inject-off", USER_ID, {
+    providerId: PROVIDER_ID,
+    model: MODEL,
+  });
+
+  const registry = new ProviderRegistry();
+  registry.register(makeStubAdapter(makeProviderResponse("Unused.")));
+
+  const app = Fastify();
+  registerChatRoute(app, {
+    sessions,
+    history: new HistoryManager(db),
+    context: new ContextBuilder(
+      {
+        listByScope: sinon.stub().resolves([]),
+        listPinnedOpenQuestions: sinon.stub().resolves([]),
+      } as any,
+      { get: sinon.stub().resolves(null) } as any,
+    ),
+    providers: registry,
+    jobs: new ExtractionJobQueue(db),
+    userId: USER_ID,
+    extractionWorker: {
+      processById: sinon.stub().resolves(),
+      sweep: sinon.stub().resolves(0),
+    } as unknown as ExtractionWorker,
+    runtimeStore: {
+      load: sinon
+        .stub()
+        .resolves({ extraction_enabled: true, injection_enabled: true }),
+      set: sinon.stub().resolves(),
+    } as unknown as RuntimeConfigStore,
+    errorLogger: {
+      log: sinon.stub().resolves(),
+    } as unknown as ErrorLogger,
+  });
+  await app.ready();
+
+  await post(
+    app,
+    { messages: [{ role: "user", content: "!inject off" }] },
+    { "x-session-id": "sess-inject-off" },
+  );
+
+  const updated = await sessions.get("sess-inject-off", USER_ID);
+  t.true((updated as any).injectionPaused);
+});
+
+test("!inject on clears injectionPaused on session", async (t) => {
+  const sessions = new SessionManager(db);
+  await sessions.getOrCreate("sess-inject-on", USER_ID);
+  await sessions.update("sess-inject-on", USER_ID, {
+    providerId: PROVIDER_ID,
+    model: MODEL,
+    injectionPaused: true,
+  } as any);
+
+  const registry = new ProviderRegistry();
+  registry.register(makeStubAdapter(makeProviderResponse("Unused.")));
+
+  const app = Fastify();
+  registerChatRoute(app, {
+    sessions,
+    history: new HistoryManager(db),
+    context: new ContextBuilder(
+      {
+        listByScope: sinon.stub().resolves([]),
+        listPinnedOpenQuestions: sinon.stub().resolves([]),
+      } as any,
+      { get: sinon.stub().resolves(null) } as any,
+    ),
+    providers: registry,
+    jobs: new ExtractionJobQueue(db),
+    userId: USER_ID,
+    extractionWorker: {
+      processById: sinon.stub().resolves(),
+      sweep: sinon.stub().resolves(0),
+    } as unknown as ExtractionWorker,
+    runtimeStore: {
+      load: sinon
+        .stub()
+        .resolves({ extraction_enabled: true, injection_enabled: true }),
+      set: sinon.stub().resolves(),
+    } as unknown as RuntimeConfigStore,
+    errorLogger: {
+      log: sinon.stub().resolves(),
+    } as unknown as ErrorLogger,
+  });
+  await app.ready();
+
+  await post(
+    app,
+    { messages: [{ role: "user", content: "!inject on" }] },
+    { "x-session-id": "sess-inject-on" },
+  );
+
+  const updated = await sessions.get("sess-inject-on", USER_ID);
+  t.false((updated as any).injectionPaused);
+});
+
+test("!inject off: context.build is not called on subsequent turn", async (t) => {
+  const sessions = new SessionManager(db);
+  await sessions.getOrCreate("sess-inject-no-build", USER_ID);
+  await sessions.update("sess-inject-no-build", USER_ID, {
+    providerId: PROVIDER_ID,
+    model: MODEL,
+    injectionPaused: true,
+  } as any);
+
+  const contextBuild = sinon.stub().resolves({
+    personaPrelude: "",
+    pinnedFactsJson: "[]",
+    expandedQuery: "",
+    queryWasNoisy: false,
+    relevantBeliefsJson: "[]",
+    openQuestionsJson: "[]",
+    beliefCount: 0,
+    questionCount: 0,
+    truncated: false,
+    searchScores: [],
+  });
+
+  const registry = new ProviderRegistry();
+  registry.register(makeStubAdapter(makeProviderResponse("No context.")));
+
+  const app = Fastify();
+  registerChatRoute(app, {
+    sessions,
+    history: new HistoryManager(db),
+    context: { build: contextBuild } as any,
+    providers: registry,
+    jobs: new ExtractionJobQueue(db),
+    userId: USER_ID,
+    extractionWorker: {
+      processById: sinon.stub().resolves(),
+      sweep: sinon.stub().resolves(0),
+    } as unknown as ExtractionWorker,
+    runtimeStore: {
+      load: sinon
+        .stub()
+        .resolves({ extraction_enabled: true, injection_enabled: true }),
+      set: sinon.stub().resolves(),
+    } as unknown as RuntimeConfigStore,
+    errorLogger: {
+      log: sinon.stub().resolves(),
+    } as unknown as ErrorLogger,
+  });
+  await app.ready();
+
+  const res = await post(
+    app,
+    { messages: [{ role: "user", content: "Normal question" }] },
+    { "x-session-id": "sess-inject-no-build" },
+  );
+
+  t.is(res.statusCode, 200);
+  t.false(
+    contextBuild.called,
+    "context.build should be skipped when injectionPaused",
+  );
+});
+
+test("!inject off: extraction still runs on subsequent turn", async (t) => {
+  const sessions = new SessionManager(db);
+  await sessions.getOrCreate("sess-inject-off-extract", USER_ID);
+  await sessions.update("sess-inject-off-extract", USER_ID, {
+    providerId: PROVIDER_ID,
+    model: MODEL,
+    injectionPaused: true,
+  } as any);
+
+  const registry = new ProviderRegistry();
+  registry.register(makeStubAdapter(makeProviderResponse("Still extracts.")));
+  const extractionWorker = {
+    processById: sinon.stub().resolves(),
+    sweep: sinon.stub().resolves(0),
+  };
+
+  const app = Fastify();
+  registerChatRoute(app, {
+    sessions,
+    history: new HistoryManager(db),
+    context: new ContextBuilder(
+      {
+        listByScope: sinon.stub().resolves([]),
+        listPinnedOpenQuestions: sinon.stub().resolves([]),
+      } as any,
+      { get: sinon.stub().resolves(null) } as any,
+    ),
+    providers: registry,
+    jobs: new ExtractionJobQueue(db),
+    userId: USER_ID,
+    extractionWorker: extractionWorker as unknown as ExtractionWorker,
+    runtimeStore: {
+      load: sinon
+        .stub()
+        .resolves({ extraction_enabled: true, injection_enabled: true }),
+      set: sinon.stub().resolves(),
+    } as unknown as RuntimeConfigStore,
+    errorLogger: {
+      log: sinon.stub().resolves(),
+    } as unknown as ErrorLogger,
+  });
+  await app.ready();
+
+  await post(
+    app,
+    { messages: [{ role: "user", content: "Extract this please" }] },
+    { "x-session-id": "sess-inject-off-extract" },
+  );
+
+  await new Promise((r) => setTimeout(r, 100));
+
+  t.true(extractionWorker.processById.called);
+});
+
+test("!inject global off calls runtimeStore.set with injection_enabled false", async (t) => {
+  const runtimeSet = sinon.stub().resolves();
+  const adapter = makeStubAdapter(makeProviderResponse("Unused."));
+  const registry = new ProviderRegistry();
+  registry.register(adapter);
+
+  const sessions = new SessionManager(db);
+  await sessions.getOrCreate("sess-global-inject", USER_ID);
+  await sessions.update("sess-global-inject", USER_ID, {
+    providerId: PROVIDER_ID,
+    model: MODEL,
+  });
+
+  const app = Fastify();
+  registerChatRoute(app, {
+    sessions,
+    history: new HistoryManager(db),
+    context: new ContextBuilder(
+      {
+        listByScope: sinon.stub().resolves([]),
+        listPinnedOpenQuestions: sinon.stub().resolves([]),
+      } as any,
+      { get: sinon.stub().resolves(null) } as any,
+    ),
+    providers: registry,
+    jobs: new ExtractionJobQueue(db),
+    userId: USER_ID,
+    extractionWorker: {
+      processById: sinon.stub().resolves(),
+      sweep: sinon.stub().resolves(0),
+    } as unknown as ExtractionWorker,
+    runtimeStore: {
+      load: sinon
+        .stub()
+        .resolves({ extraction_enabled: true, injection_enabled: true }),
+      set: runtimeSet,
+    } as unknown as RuntimeConfigStore,
+    errorLogger: {
+      log: sinon.stub().resolves(),
+    } as unknown as ErrorLogger,
+  });
+  await app.ready();
+
+  const res = await post(
+    app,
+    { messages: [{ role: "user", content: "!inject global off" }] },
+    { "x-session-id": "sess-global-inject" },
+  );
+
+  t.is(res.statusCode, 200);
+  t.true(runtimeSet.calledWith("injection_enabled", false));
+  t.false((adapter.call as sinon.SinonStub).called);
+});
+
+test("!inject command tenure parse_status is missing since no LLM fired", async (t) => {
+  const { app } = await buildApp(makeProviderResponse("Unused."));
+
+  const res = await post(app, {
+    messages: [{ role: "user", content: "!inject off" }],
+  });
+
+  const body = JSON.parse(res.body);
+  t.is(body.tenure.parse_status, "missing");
+});
+
+test("streaming: !inject off returns non-streaming JSON even when stream:true", async (t) => {
+  const events = streamEvents(["Should not appear."]);
+  const { app } = await buildApp(makeStreamAdapter(events));
+
+  const res = await post(app, {
+    stream: true,
+    messages: [{ role: "user", content: "!inject off" }],
+  });
+
+  t.is(res.statusCode, 200);
+  t.not(res.headers["content-type"], "text/event-stream");
+  const body = JSON.parse(res.body);
+  t.is(body.object, "chat.completion");
+});
+
+test("!extract off and !inject off are independent: both can be set simultaneously", async (t) => {
+  const sessions = new SessionManager(db);
+  await sessions.getOrCreate("sess-both-off", USER_ID);
+  await sessions.update("sess-both-off", USER_ID, {
+    providerId: PROVIDER_ID,
+    model: MODEL,
+  });
+
+  const registry = new ProviderRegistry();
+  registry.register(makeStubAdapter(makeProviderResponse("Unused.")));
+
+  const app = Fastify();
+  registerChatRoute(app, {
+    sessions,
+    history: new HistoryManager(db),
+    context: new ContextBuilder(
+      {
+        listByScope: sinon.stub().resolves([]),
+        listPinnedOpenQuestions: sinon.stub().resolves([]),
+      } as any,
+      { get: sinon.stub().resolves(null) } as any,
+    ),
+    providers: registry,
+    jobs: new ExtractionJobQueue(db),
+    userId: USER_ID,
+    extractionWorker: {
+      processById: sinon.stub().resolves(),
+      sweep: sinon.stub().resolves(0),
+    } as unknown as ExtractionWorker,
+    runtimeStore: {
+      load: sinon
+        .stub()
+        .resolves({ extraction_enabled: true, injection_enabled: true }),
+      set: sinon.stub().resolves(),
+    } as unknown as RuntimeConfigStore,
+    errorLogger: {
+      log: sinon.stub().resolves(),
+    } as unknown as ErrorLogger,
+  });
+  await app.ready();
+
+  await post(
+    app,
+    { messages: [{ role: "user", content: "!extract off" }] },
+    { "x-session-id": "sess-both-off" },
+  );
+
+  await post(
+    app,
+    { messages: [{ role: "user", content: "!inject off" }] },
+    { "x-session-id": "sess-both-off" },
+  );
+
+  const updated = await sessions.get("sess-both-off", USER_ID);
+  t.true((updated as any).extractionPaused);
+  t.true((updated as any).injectionPaused);
+});
+
+test("!inject off does not affect extractionPaused field", async (t) => {
+  const sessions = new SessionManager(db);
+  await sessions.getOrCreate("sess-inject-no-extract-change", USER_ID);
+  await sessions.update("sess-inject-no-extract-change", USER_ID, {
+    providerId: PROVIDER_ID,
+    model: MODEL,
+    extractionPaused: false,
+  } as any);
+
+  const registry = new ProviderRegistry();
+  registry.register(makeStubAdapter(makeProviderResponse("Unused.")));
+
+  const app = Fastify();
+  registerChatRoute(app, {
+    sessions,
+    history: new HistoryManager(db),
+    context: new ContextBuilder(
+      {
+        listByScope: sinon.stub().resolves([]),
+        listPinnedOpenQuestions: sinon.stub().resolves([]),
+      } as any,
+      { get: sinon.stub().resolves(null) } as any,
+    ),
+    providers: registry,
+    jobs: new ExtractionJobQueue(db),
+    userId: USER_ID,
+    extractionWorker: {
+      processById: sinon.stub().resolves(),
+      sweep: sinon.stub().resolves(0),
+    } as unknown as ExtractionWorker,
+    runtimeStore: {
+      load: sinon
+        .stub()
+        .resolves({ extraction_enabled: true, injection_enabled: true }),
+      set: sinon.stub().resolves(),
+    } as unknown as RuntimeConfigStore,
+    errorLogger: {
+      log: sinon.stub().resolves(),
+    } as unknown as ErrorLogger,
+  });
+  await app.ready();
+
+  await post(
+    app,
+    { messages: [{ role: "user", content: "!inject off" }] },
+    { "x-session-id": "sess-inject-no-extract-change" },
+  );
+
+  const updated = await sessions.get("sess-inject-no-extract-change", USER_ID);
+
+  t.false((updated as any).extractionPaused);
+  t.true((updated as any).injectionPaused);
+});
+
+test("!extract off does not affect injectionPaused field", async (t) => {
+  const sessions = new SessionManager(db);
+  await sessions.getOrCreate("sess-extract-no-inject-change", USER_ID);
+  await sessions.update("sess-extract-no-inject-change", USER_ID, {
+    providerId: PROVIDER_ID,
+    model: MODEL,
+    injectionPaused: false,
+  } as any);
+
+  const registry = new ProviderRegistry();
+  registry.register(makeStubAdapter(makeProviderResponse("Unused.")));
+
+  const app = Fastify();
+  registerChatRoute(app, {
+    sessions,
+    history: new HistoryManager(db),
+    context: new ContextBuilder(
+      {
+        listByScope: sinon.stub().resolves([]),
+        listPinnedOpenQuestions: sinon.stub().resolves([]),
+      } as any,
+      { get: sinon.stub().resolves(null) } as any,
+    ),
+    providers: registry,
+    jobs: new ExtractionJobQueue(db),
+    userId: USER_ID,
+    extractionWorker: {
+      processById: sinon.stub().resolves(),
+      sweep: sinon.stub().resolves(0),
+    } as unknown as ExtractionWorker,
+    runtimeStore: {
+      load: sinon
+        .stub()
+        .resolves({ extraction_enabled: true, injection_enabled: true }),
+      set: sinon.stub().resolves(),
+    } as unknown as RuntimeConfigStore,
+    errorLogger: {
+      log: sinon.stub().resolves(),
+    } as unknown as ErrorLogger,
+  });
+  await app.ready();
+
+  await post(
+    app,
+    { messages: [{ role: "user", content: "!extract off" }] },
+    { "x-session-id": "sess-extract-no-inject-change" },
+  );
+
+  const updated = await sessions.get("sess-extract-no-inject-change", USER_ID);
+
+  t.false((updated as any).injectionPaused);
+  t.true((updated as any).extractionPaused);
 });

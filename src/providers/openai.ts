@@ -13,6 +13,19 @@ import type { OpenAIEndpointFlavor } from "../config/runtime.js";
 
 const DEFAULT_BASE_URL = "https://api.openai.com/v1";
 
+interface OAIToolCall {
+  id: string;
+  type: "function";
+  function: { name: string; arguments: string };
+}
+
+interface OAIToolCallDelta {
+  index: number;
+  id?: string;
+  type?: "function";
+  function?: { name?: string; arguments?: string };
+}
+
 export class OpenAIAdapter implements ProviderAdapter {
   readonly id = "openai" as const;
   private readonly baseUrl: string;
@@ -29,6 +42,12 @@ export class OpenAIAdapter implements ProviderAdapter {
     req: NormalizedRequest,
     systemPrompt: SystemPrompt,
   ): Promise<NormalizedResponse> {
+    if (!req.model) {
+      throw new Error(
+        "No model specified — select a model in your client settings.",
+      );
+    }
+
     const { messages, body: extraBody } = this.composeRequest(
       req,
       systemPrompt,
@@ -47,6 +66,7 @@ export class OpenAIAdapter implements ProviderAdapter {
         stream: false,
         ...extraBody,
       }),
+      signal: AbortSignal.timeout(120_000),
     });
 
     if (!res.ok) {
@@ -56,7 +76,10 @@ export class OpenAIAdapter implements ProviderAdapter {
     const data = (await res.json()) as {
       model: string;
       choices: Array<{
-        message: { content: string };
+        message: {
+          content: string | null;
+          tool_calls?: OAIToolCall[];
+        };
         finish_reason: string;
       }>;
       usage: {
@@ -64,15 +87,24 @@ export class OpenAIAdapter implements ProviderAdapter {
         completion_tokens: number;
       };
     };
+
+    if (!data.choices?.length) {
+      throw new ProviderError("openai: empty choices in response");
+    }
+
+    const choice = data.choices[0];
+    const toolCalls = choice.message.tool_calls;
+
     return {
-      content: data.choices[0].message.content,
+      content: choice.message.content ?? "",
       model: data.model,
       provider: "openai",
-      finish_reason: data.choices[0].finish_reason,
+      finish_reason: choice.finish_reason,
       usage: {
         input_tokens: data.usage.prompt_tokens,
         output_tokens: data.usage.completion_tokens,
       },
+      ...(toolCalls?.length ? { toolCalls } : {}),
     };
   }
 
@@ -80,6 +112,12 @@ export class OpenAIAdapter implements ProviderAdapter {
     req: NormalizedRequest,
     systemPrompt: SystemPrompt,
   ): AsyncGenerator<StreamEvent> {
+    if (!req.model) {
+      throw new Error(
+        "No model specified — select a model in your client settings.",
+      );
+    }
+
     const { messages, body: extraBody } = this.composeRequest(
       req,
       systemPrompt,
@@ -99,6 +137,7 @@ export class OpenAIAdapter implements ProviderAdapter {
         stream_options: { include_usage: true },
         ...extraBody,
       }),
+      signal: AbortSignal.timeout(120_000),
     });
 
     if (!res.ok) {
@@ -112,6 +151,11 @@ export class OpenAIAdapter implements ProviderAdapter {
     let model = req.model;
     let finishReason = "stop";
     let usage = { input_tokens: 0, output_tokens: 0 };
+
+    const toolCallAccumulator: Record<
+      number,
+      { id: string; name: string; arguments: string }
+    > = {};
 
     for await (const line of sseLines(res.body)) {
       if (line === "[DONE]") break;
@@ -127,15 +171,29 @@ export class OpenAIAdapter implements ProviderAdapter {
 
       const choices = data.choices as
         | Array<{
-            delta?: { content?: string };
+            delta?: { content?: string; tool_calls?: OAIToolCallDelta[] };
             finish_reason?: string;
           }>
         | undefined;
 
       const choice = choices?.[0];
+
       if (choice?.delta?.content) {
         yield { type: "content_delta", delta: choice.delta.content };
       }
+
+      if (choice?.delta?.tool_calls) {
+        for (const tc of choice.delta.tool_calls) {
+          if (!toolCallAccumulator[tc.index]) {
+            toolCallAccumulator[tc.index] = { id: "", name: "", arguments: "" };
+          }
+          const acc = toolCallAccumulator[tc.index];
+          if (tc.id) acc.id = tc.id;
+          if (tc.function?.name) acc.name = tc.function.name;
+          if (tc.function?.arguments) acc.arguments += tc.function.arguments;
+        }
+      }
+
       if (choice?.finish_reason) {
         finishReason = choice.finish_reason;
       }
@@ -151,11 +209,22 @@ export class OpenAIAdapter implements ProviderAdapter {
       }
     }
 
+    const toolCalls = Object.values(toolCallAccumulator);
+
     yield {
       type: "stream_end",
       model,
       finish_reason: finishReason,
       usage,
+      ...(toolCalls.length
+        ? {
+            toolCalls: toolCalls.map((tc) => ({
+              id: tc.id,
+              type: "function" as const,
+              function: { name: tc.name, arguments: tc.arguments },
+            })),
+          }
+        : {}),
     };
   }
 
@@ -163,7 +232,14 @@ export class OpenAIAdapter implements ProviderAdapter {
     try {
       const res = await fetch(`${this.baseUrl}/models`, {
         headers: { authorization: `Bearer ${this.apiKey}` },
+        signal: AbortSignal.timeout(10_000),
       });
+
+      if (res.status === 401) {
+        throw new ProviderError(
+          "OpenAI authentication failed — check your API key in the admin UI",
+        );
+      }
       if (!res.ok) return [];
       const data = (await res.json()) as { data?: ModelInfo[] };
       return (data.data ?? []).map((m) => ({
@@ -172,7 +248,8 @@ export class OpenAIAdapter implements ProviderAdapter {
         created: m.created ?? 0,
         owned_by: m.owned_by ?? this.id,
       }));
-    } catch {
+    } catch (e) {
+      if (e instanceof ProviderError) throw e;
       return [];
     }
   }
@@ -317,8 +394,19 @@ export class OpenAIAdapter implements ProviderAdapter {
   }
 
   private mergeSystemPrompt(incoming: Message[], injected: string): Message[] {
-    const existingSystem =
-      incoming.find((m) => m.role === "system")?.content ?? "";
+    const sys = incoming.find((m) => m.role === "system");
+    // content can be a ContentPart[] — extract text safely to avoid
+    // "[object Object]" appearing in the merged system prompt.
+    const existingSystem = sys
+      ? typeof sys.content === "string"
+        ? sys.content
+        : (sys.content as ContentPart[])
+            .filter(
+              (p): p is { type: "text"; text: string } => p.type === "text",
+            )
+            .map((p) => p.text)
+            .join("\n")
+      : "";
     const rest = incoming.filter((m) => m.role !== "system");
     const merged = [injected, existingSystem].filter(Boolean).join("\n\n");
     return merged ? [{ role: "system", content: merged }, ...rest] : rest;

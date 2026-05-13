@@ -20,12 +20,6 @@ export class PersonaCache {
     await this.col.replaceOne({ _id: doc._id }, doc, { upsert: true });
   }
 
-  async regenerate(userId: string): Promise<void> {
-    await this.invalidate(userId);
-
-    await this.get(userId);
-  }
-
   async invalidate(userId: string): Promise<void> {
     await this.col.updateOne(
       { _id: userId },

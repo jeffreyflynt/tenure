@@ -33,6 +33,20 @@ import { registerPersonaRoutes, type PersonaDeps } from "./routes/persona.js";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
+const SAFE_ERROR_PATTERNS = [
+  "authentication failed",
+  "api key",
+  "rate limit",
+  "no model specified",
+  "no provider configured",
+  "not configured",
+];
+
+function isSafeToForward(message: string): boolean {
+  const lower = message.toLowerCase();
+  return SAFE_ERROR_PATTERNS.some((p) => lower.includes(p));
+}
+
 export interface ServerDeps {
   db: Db;
   cols: Collections;
@@ -98,8 +112,13 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
         error: { message: fastifyError.message, type: "client_error" },
       });
     }
+
+    const clientMessage = isSafeToForward(fastifyError.message)
+      ? fastifyError.message
+      : "internal server error";
+
     return reply.status(500).send({
-      error: { message: "internal server error", type: "internal_error" },
+      error: { message: clientMessage, type: "internal_error" },
     });
   });
 
@@ -112,7 +131,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     }
   });
 
-  app.get("/v1/models", async () => {
+  app.get("/v1/models", async (_req, _reply) => {
     const models = await deps.providers.listModels();
     return { object: "list", data: models };
   });
@@ -205,33 +224,79 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     );
   });
 
-  app.addHook("onReady", async () => {
-    const extractionSweep = new AsyncTask(
-      "extraction-sweep",
-      () => deps.extractionWorker.sweep(20),
-      (err: Error) => {
-        deps.errorLogger
-          .log({
-            severity: "warning",
-            stage: "belief_extraction",
-            message: err.message,
-            error: err,
-            user_id: deps.userId,
-          })
-          .catch(() => {});
-      },
-    );
+  // In server.ts, replace the extraction sweep job setup:
 
-    app.scheduler.addSimpleIntervalJob(
-      new SimpleIntervalJob(
-        { minutes: 1, runImmediately: true },
-        extractionSweep,
-        {
-          id: "extraction-sweep",
-          preventOverrun: true,
+  app.addHook("onReady", async () => {
+    let consecutiveEmpty = 0;
+    const BASE_INTERVAL_MS = 60_000; // 1 minute
+    const MAX_INTERVAL_MS = 5 * 60_000; // 5 minutes max backoff
+    const BACKOFF_AFTER = 3; // start backing off after 3 empty sweeps
+
+    let currentJob: SimpleIntervalJob | null = null;
+
+    const createSweepTask = () =>
+      new AsyncTask(
+        "extraction-sweep",
+        async () => {
+          const processed = await deps.extractionWorker.sweep(20);
+
+          if (processed === 0) {
+            consecutiveEmpty++;
+
+            // Back off when consistently idle
+            if (consecutiveEmpty >= BACKOFF_AFTER) {
+              const newInterval = Math.min(
+                BASE_INTERVAL_MS *
+                  Math.pow(2, consecutiveEmpty - BACKOFF_AFTER),
+                MAX_INTERVAL_MS,
+              );
+
+              // Reschedule at slower interval
+              if (currentJob) {
+                app.scheduler.removeById("extraction-sweep");
+              }
+              currentJob = new SimpleIntervalJob(
+                { milliseconds: newInterval, runImmediately: false },
+                createSweepTask(),
+                { id: "extraction-sweep", preventOverrun: true },
+              );
+              app.scheduler.addSimpleIntervalJob(currentJob);
+            }
+          } else {
+            // Work found — reset to base interval if backed off
+            if (consecutiveEmpty >= BACKOFF_AFTER) {
+              if (currentJob) {
+                app.scheduler.removeById("extraction-sweep");
+              }
+              currentJob = new SimpleIntervalJob(
+                { milliseconds: BASE_INTERVAL_MS, runImmediately: false },
+                createSweepTask(),
+                { id: "extraction-sweep", preventOverrun: true },
+              );
+              app.scheduler.addSimpleIntervalJob(currentJob);
+            }
+            consecutiveEmpty = 0;
+          }
         },
-      ),
+        (err: Error) => {
+          deps.errorLogger
+            .log({
+              severity: "warning",
+              stage: "belief_extraction",
+              message: err.message,
+              error: err,
+              user_id: deps.userId,
+            })
+            .catch(() => {});
+        },
+      );
+
+    currentJob = new SimpleIntervalJob(
+      { milliseconds: BASE_INTERVAL_MS, runImmediately: true },
+      createSweepTask(),
+      { id: "extraction-sweep", preventOverrun: true },
     );
+    app.scheduler.addSimpleIntervalJob(currentJob);
   });
 
   app.get("/", async (_req, reply) => {

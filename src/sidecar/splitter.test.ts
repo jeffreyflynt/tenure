@@ -99,3 +99,77 @@ test("round-trips a realistic sidecar payload", (t) => {
   const raw = JSON.stringify(payload);
   t.deepEqual(parseSidecar(raw), payload);
 });
+
+test("unwraps sidecar block wrapped in a json code fence", (t) => {
+  const json = '{"turn_signal":"substantive"}';
+  const content = `Visible text.\n\`\`\`json\n${SIDECAR_BEGIN}\n${json}\n${SIDECAR_END}\n\`\`\``;
+  const result = splitSidecar(content);
+  t.is(result.parseStatus, "parsed");
+  t.is(result.sidecarRaw, json);
+  t.is(result.visible, "Visible text.");
+});
+
+test("unwraps sidecar block wrapped in a plain code fence", (t) => {
+  const json = '{"turn_signal":"acknowledgment"}';
+  const content = `Visible.\n\`\`\`\n${SIDECAR_BEGIN}\n${json}\n${SIDECAR_END}\n\`\`\``;
+  const result = splitSidecar(content);
+  t.is(result.parseStatus, "parsed");
+  t.is(result.sidecarRaw, json);
+});
+
+test("does not strip code fences that do not contain a sidecar marker", (t) => {
+  const json = '{"turn_signal":"substantive"}';
+  const content = `\`\`\`ts\nconst x = 1;\n\`\`\`\n${SIDECAR_BEGIN}\n${json}\n${SIDECAR_END}`;
+  const result = splitSidecar(content);
+  t.is(result.parseStatus, "parsed");
+  t.is(result.sidecarRaw, json);
+  t.true(result.visible.includes("const x = 1;"));
+});
+
+test("normalizes begin marker with extra spaces", (t) => {
+  const json = '{"turn_signal":"substantive"}';
+  const content = `Visible.\n<<< SIDECAR_JSON >>>\n${json}\n${SIDECAR_END}`;
+  const result = splitSidecar(content);
+  t.is(result.parseStatus, "parsed");
+  t.is(result.sidecarRaw, json);
+});
+
+test("normalizes end marker with extra spaces", (t) => {
+  const json = '{"turn_signal":"substantive"}';
+  const content = `Visible.\n${SIDECAR_BEGIN}\n${json}\n<<< END_SIDECAR >>>`;
+  const result = splitSidecar(content);
+  t.is(result.parseStatus, "parsed");
+  t.is(result.sidecarRaw, json);
+});
+
+test("normalizes both markers with extra spaces", (t) => {
+  const json = '{"turn_signal":"substantive"}';
+  const content = `Visible.\n<<< SIDECAR_JSON >>>\n${json}\n<<< END_SIDECAR >>>`;
+  const result = splitSidecar(content);
+  t.is(result.parseStatus, "parsed");
+  t.is(result.sidecarRaw, json);
+});
+
+test("normalizes markers with newline whitespace between angle brackets", (t) => {
+  const json = '{"turn_signal":"substantive"}';
+  const content = `Visible.\n<<<SIDECAR_JSON >>>\n${json}\n<<<END_SIDECAR >>>`;
+  const result = splitSidecar(content);
+  t.is(result.parseStatus, "parsed");
+  t.is(result.sidecarRaw, json);
+});
+
+test("recovers when sidecar is fenced and markers have extra spaces", (t) => {
+  const json = '{"turn_signal":"substantive"}';
+  const content = `Visible.\n\`\`\`json\n<<< SIDECAR_JSON >>>\n${json}\n<<< END_SIDECAR >>>\n\`\`\``;
+  const result = splitSidecar(content);
+  t.is(result.parseStatus, "parsed");
+  t.is(result.sidecarRaw, json);
+});
+
+test("visible text from normalized response does not contain raw whitespace markers", (t) => {
+  const json = '{"turn_signal":"substantive"}';
+  const content = `Visible.\n<<< SIDECAR_JSON >>>\n${json}\n<<< END_SIDECAR >>>`;
+  const result = splitSidecar(content);
+  t.false(result.visible.includes("<<< SIDECAR_JSON >>>"));
+  t.false(result.visible.includes("<<<SIDECAR_JSON>>>"));
+});

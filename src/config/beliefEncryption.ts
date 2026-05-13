@@ -72,7 +72,16 @@ export async function initBeliefEncryption(
   });
 
   if (existingKey) {
-    dataKeyId = existingKey._id as unknown as Binary;
+    try {
+      const testVal = await clientEncryption.encrypt("probe", {
+        keyAltName: KEY_ALT_NAME,
+        algorithm: "AEAD_AES_256_CBC_HMAC_SHA_512-Random",
+      });
+      await clientEncryption.decrypt(testVal);
+      dataKeyId = existingKey._id as unknown as Binary;
+    } catch {
+      throw new Error("Belief encryption key mismatch...");
+    }
   } else {
     dataKeyId = await clientEncryption.createDataKey("local", {
       keyAltNames: [KEY_ALT_NAME],

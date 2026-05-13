@@ -818,6 +818,7 @@ async function showModelPicker(providerId, err) {
     }
 
     set(\`
+    <img src="/assets/tenure-logo.png" alt="Tenure" class="logo">
       <div class="header">
         <h1>Pick a default model</h1>
         <p>Used for belief extraction and as your chat default. You can change this later.</p>
@@ -953,6 +954,7 @@ async function skipAll() {
     await fetch(SKIP_URL, { method: "POST", headers: { Authorization: \`Bearer \${token}\` } });
   } catch {}
   set(\`
+  <img src="/assets/tenure-logo.png" alt="Tenure" class="logo">
     <div class="completion">
       <h2>Setup skipped</h2>
       <p>You can run onboarding at any time from the settings panel.</p>

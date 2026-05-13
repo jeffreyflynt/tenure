@@ -8,6 +8,10 @@ import {
   fetchExistingUserScopes,
   type ScopeDetectorDeps,
   expandScopeHierarchy,
+  matchInjectCommand,
+  tryInterceptInjectCommand,
+  matchExtractCommand,
+  tryInterceptExtractCommand,
 } from "./scopeDetector.js";
 
 test("matchScopeCommand returns null for a regular message", (t) => {
@@ -562,4 +566,554 @@ test("expandScopeHierarchy handles mixed flat and hierarchical scopes", (t) => {
 
 test("expandScopeHierarchy returns empty array for empty input", (t) => {
   t.deepEqual(expandScopeHierarchy([]), []);
+});
+
+test("matchExtractCommand returns null for a regular message", (t) => {
+  t.is(matchExtractCommand("what is Redis?"), null);
+});
+
+test("matchExtractCommand returns null for empty string", (t) => {
+  t.is(matchExtractCommand(""), null);
+});
+
+test("matchExtractCommand returns null for partial prefix", (t) => {
+  t.is(matchExtractCommand("!extract"), null);
+});
+
+test("matchExtractCommand returns null when prefix appears mid-message", (t) => {
+  t.is(matchExtractCommand("please !extract off for me"), null);
+});
+
+test("matchExtractCommand matches !extract off", (t) => {
+  t.is(matchExtractCommand("!extract off"), "off");
+});
+
+test("matchExtractCommand matches !extract on", (t) => {
+  t.is(matchExtractCommand("!extract on"), "on");
+});
+
+test("matchExtractCommand matches !extract global off", (t) => {
+  t.is(matchExtractCommand("!extract global off"), "global-off");
+});
+
+test("matchExtractCommand matches !extract global on", (t) => {
+  t.is(matchExtractCommand("!extract global on"), "global-on");
+});
+
+test("matchExtractCommand is case-insensitive", (t) => {
+  t.is(matchExtractCommand("!EXTRACT OFF"), "off");
+  t.is(matchExtractCommand("!Extract On"), "on");
+  t.is(matchExtractCommand("!EXTRACT GLOBAL OFF"), "global-off");
+});
+
+test("matchExtractCommand ignores surrounding whitespace", (t) => {
+  t.is(matchExtractCommand("  !extract off  "), "off");
+  t.is(matchExtractCommand("  !extract global on  "), "global-on");
+});
+
+test("matchExtractCommand returns null for unknown subcommand", (t) => {
+  t.is(matchExtractCommand("!extract pause"), null);
+  t.is(matchExtractCommand("!extract disable"), null);
+});
+
+function makeExtractDeps(
+  overrides: {
+    sessionUpdate?: sinon.SinonStub;
+    runtimeSet?: sinon.SinonStub;
+  } = {},
+) {
+  return {
+    sessions: {
+      update: overrides.sessionUpdate ?? sinon.stub().resolves({}),
+    },
+    runtimeStore: {
+      set: overrides.runtimeSet ?? sinon.stub().resolves(),
+    },
+  };
+}
+
+test("tryInterceptExtractCommand returns null for non-command message", async (t) => {
+  const result = await tryInterceptExtractCommand(
+    "what is Redis?",
+    "session-1",
+    "user-1",
+    makeExtractDeps(),
+    NOOP_LOGGER,
+  );
+  t.is(result, null);
+});
+
+test("tryInterceptExtractCommand returns null for bare !extract", async (t) => {
+  const result = await tryInterceptExtractCommand(
+    "!extract",
+    "session-1",
+    "user-1",
+    makeExtractDeps(),
+    NOOP_LOGGER,
+  );
+  t.is(result, null);
+});
+
+test("tryInterceptExtractCommand off: updates session with extractionPaused true", async (t) => {
+  const sessionUpdate = sinon.stub().resolves({});
+  const result = await tryInterceptExtractCommand(
+    "!extract off",
+    "session-1",
+    "user-1",
+    makeExtractDeps({ sessionUpdate }),
+    NOOP_LOGGER,
+  );
+  t.truthy(result);
+  t.true(
+    sessionUpdate.calledOnceWith("session-1", "user-1", {
+      extractionPaused: true,
+    }),
+  );
+});
+
+test("tryInterceptExtractCommand off: confirmation message mentions extract on", async (t) => {
+  const result = await tryInterceptExtractCommand(
+    "!extract off",
+    "session-1",
+    "user-1",
+    makeExtractDeps(),
+    NOOP_LOGGER,
+  );
+  t.truthy(result);
+  t.true(result!.message.includes("!extract on"));
+});
+
+test("tryInterceptExtractCommand off: confirmation message mentions injection still active", async (t) => {
+  const result = await tryInterceptExtractCommand(
+    "!extract off",
+    "session-1",
+    "user-1",
+    makeExtractDeps(),
+    NOOP_LOGGER,
+  );
+  t.truthy(result);
+
+  t.true(
+    result!.message.toLowerCase().includes("inject") ||
+      result!.message.toLowerCase().includes("existing beliefs"),
+  );
+});
+
+test("tryInterceptExtractCommand off: does not touch runtimeStore", async (t) => {
+  const runtimeSet = sinon.stub().resolves();
+  await tryInterceptExtractCommand(
+    "!extract off",
+    "session-1",
+    "user-1",
+    makeExtractDeps({ runtimeSet }),
+    NOOP_LOGGER,
+  );
+  t.false(runtimeSet.called);
+});
+
+test("tryInterceptExtractCommand on: updates session with extractionPaused false", async (t) => {
+  const sessionUpdate = sinon.stub().resolves({});
+  const result = await tryInterceptExtractCommand(
+    "!extract on",
+    "session-1",
+    "user-1",
+    makeExtractDeps({ sessionUpdate }),
+    NOOP_LOGGER,
+  );
+  t.truthy(result);
+  t.true(
+    sessionUpdate.calledOnceWith("session-1", "user-1", {
+      extractionPaused: false,
+    }),
+  );
+});
+
+test("tryInterceptExtractCommand on: does not touch runtimeStore", async (t) => {
+  const runtimeSet = sinon.stub().resolves();
+  await tryInterceptExtractCommand(
+    "!extract on",
+    "session-1",
+    "user-1",
+    makeExtractDeps({ runtimeSet }),
+    NOOP_LOGGER,
+  );
+  t.false(runtimeSet.called);
+});
+
+test("tryInterceptExtractCommand global-off: sets extraction_enabled false in runtimeStore", async (t) => {
+  const runtimeSet = sinon.stub().resolves();
+  const result = await tryInterceptExtractCommand(
+    "!extract global off",
+    "session-1",
+    "user-1",
+    makeExtractDeps({ runtimeSet }),
+    NOOP_LOGGER,
+  );
+  t.truthy(result);
+  t.true(runtimeSet.calledOnceWith("extraction_enabled", false));
+});
+
+test("tryInterceptExtractCommand global-off: does not touch session", async (t) => {
+  const sessionUpdate = sinon.stub().resolves({});
+  await tryInterceptExtractCommand(
+    "!extract global off",
+    "session-1",
+    "user-1",
+    makeExtractDeps({ sessionUpdate }),
+    NOOP_LOGGER,
+  );
+  t.false(sessionUpdate.called);
+});
+
+test("tryInterceptExtractCommand global-on: sets extraction_enabled true in runtimeStore", async (t) => {
+  const runtimeSet = sinon.stub().resolves();
+  const result = await tryInterceptExtractCommand(
+    "!extract global on",
+    "session-1",
+    "user-1",
+    makeExtractDeps({ runtimeSet }),
+    NOOP_LOGGER,
+  );
+  t.truthy(result);
+  t.true(runtimeSet.calledOnceWith("extraction_enabled", true));
+});
+
+test("tryInterceptExtractCommand global-on: does not touch session", async (t) => {
+  const sessionUpdate = sinon.stub().resolves({});
+  await tryInterceptExtractCommand(
+    "!extract global on",
+    "session-1",
+    "user-1",
+    makeExtractDeps({ sessionUpdate }),
+    NOOP_LOGGER,
+  );
+  t.false(sessionUpdate.called);
+});
+
+test("tryInterceptExtractCommand off: returns error message when session update fails", async (t) => {
+  const sessionUpdate = sinon.stub().rejects(new Error("mongo down"));
+  const result = await tryInterceptExtractCommand(
+    "!extract off",
+    "session-1",
+    "user-1",
+    makeExtractDeps({ sessionUpdate }),
+    NOOP_LOGGER,
+  );
+  t.truthy(result);
+  t.true(result!.message.toLowerCase().includes("failed"));
+});
+
+test("tryInterceptExtractCommand on: returns error message when session update fails", async (t) => {
+  const sessionUpdate = sinon.stub().rejects(new Error("mongo down"));
+  const result = await tryInterceptExtractCommand(
+    "!extract on",
+    "session-1",
+    "user-1",
+    makeExtractDeps({ sessionUpdate }),
+    NOOP_LOGGER,
+  );
+  t.truthy(result);
+  t.true(result!.message.toLowerCase().includes("failed"));
+});
+
+test("tryInterceptExtractCommand global-off: returns error message when runtimeStore set fails", async (t) => {
+  const runtimeSet = sinon.stub().rejects(new Error("config db down"));
+  const result = await tryInterceptExtractCommand(
+    "!extract global off",
+    "session-1",
+    "user-1",
+    makeExtractDeps({ runtimeSet }),
+    NOOP_LOGGER,
+  );
+  t.truthy(result);
+  t.true(result!.message.toLowerCase().includes("failed"));
+});
+
+test("tryInterceptExtractCommand global-on: returns error message when runtimeStore set fails", async (t) => {
+  const runtimeSet = sinon.stub().rejects(new Error("config db down"));
+  const result = await tryInterceptExtractCommand(
+    "!extract global on",
+    "session-1",
+    "user-1",
+    makeExtractDeps({ runtimeSet }),
+    NOOP_LOGGER,
+  );
+  t.truthy(result);
+  t.true(result!.message.toLowerCase().includes("failed"));
+});
+
+test("matchInjectCommand returns null for a regular message", (t) => {
+  t.is(matchInjectCommand("what is Redis?"), null);
+});
+
+test("matchInjectCommand returns null for empty string", (t) => {
+  t.is(matchInjectCommand(""), null);
+});
+
+test("matchInjectCommand returns null for bare !inject", (t) => {
+  t.is(matchInjectCommand("!inject"), null);
+});
+
+test("matchInjectCommand returns null when prefix appears mid-message", (t) => {
+  t.is(matchInjectCommand("please !inject off for me"), null);
+});
+
+test("matchInjectCommand matches !inject off", (t) => {
+  t.is(matchInjectCommand("!inject off"), "off");
+});
+
+test("matchInjectCommand matches !inject on", (t) => {
+  t.is(matchInjectCommand("!inject on"), "on");
+});
+
+test("matchInjectCommand matches !inject global off", (t) => {
+  t.is(matchInjectCommand("!inject global off"), "global-off");
+});
+
+test("matchInjectCommand matches !inject global on", (t) => {
+  t.is(matchInjectCommand("!inject global on"), "global-on");
+});
+
+test("matchInjectCommand is case-insensitive", (t) => {
+  t.is(matchInjectCommand("!INJECT OFF"), "off");
+  t.is(matchInjectCommand("!Inject On"), "on");
+  t.is(matchInjectCommand("!INJECT GLOBAL OFF"), "global-off");
+});
+
+test("matchInjectCommand ignores surrounding whitespace", (t) => {
+  t.is(matchInjectCommand("  !inject off  "), "off");
+  t.is(matchInjectCommand("  !inject global on  "), "global-on");
+});
+
+test("matchInjectCommand returns null for unknown subcommand", (t) => {
+  t.is(matchInjectCommand("!inject pause"), null);
+  t.is(matchInjectCommand("!inject disable"), null);
+});
+
+function makeInjectDeps(
+  overrides: {
+    sessionUpdate?: sinon.SinonStub;
+    runtimeSet?: sinon.SinonStub;
+  } = {},
+) {
+  return {
+    sessions: {
+      update: overrides.sessionUpdate ?? sinon.stub().resolves({}),
+    },
+    runtimeStore: {
+      set: overrides.runtimeSet ?? sinon.stub().resolves(),
+    },
+  };
+}
+
+test("tryInterceptInjectCommand returns null for non-command message", async (t) => {
+  const result = await tryInterceptInjectCommand(
+    "what is Redis?",
+    "session-1",
+    "user-1",
+    makeInjectDeps(),
+    NOOP_LOGGER,
+  );
+  t.is(result, null);
+});
+
+test("tryInterceptInjectCommand off: updates session with injectionPaused true", async (t) => {
+  const sessionUpdate = sinon.stub().resolves({});
+  const result = await tryInterceptInjectCommand(
+    "!inject off",
+    "session-1",
+    "user-1",
+    makeInjectDeps({ sessionUpdate }),
+    NOOP_LOGGER,
+  );
+  t.truthy(result);
+  t.true(
+    sessionUpdate.calledOnceWith("session-1", "user-1", {
+      injectionPaused: true,
+    }),
+  );
+});
+
+test("tryInterceptInjectCommand off: confirmation message mentions extraction still running", async (t) => {
+  const result = await tryInterceptInjectCommand(
+    "!inject off",
+    "session-1",
+    "user-1",
+    makeInjectDeps(),
+    NOOP_LOGGER,
+  );
+  t.truthy(result);
+
+  t.true(result!.message.toLowerCase().includes("extract"));
+});
+
+test("tryInterceptInjectCommand off: confirmation message mentions !inject on to resume", async (t) => {
+  const result = await tryInterceptInjectCommand(
+    "!inject off",
+    "session-1",
+    "user-1",
+    makeInjectDeps(),
+    NOOP_LOGGER,
+  );
+  t.truthy(result);
+  t.true(result!.message.includes("!inject on"));
+});
+
+test("tryInterceptInjectCommand off: does not touch runtimeStore", async (t) => {
+  const runtimeSet = sinon.stub().resolves();
+  await tryInterceptInjectCommand(
+    "!inject off",
+    "session-1",
+    "user-1",
+    makeInjectDeps({ runtimeSet }),
+    NOOP_LOGGER,
+  );
+  t.false(runtimeSet.called);
+});
+
+test("tryInterceptInjectCommand on: updates session with injectionPaused false", async (t) => {
+  const sessionUpdate = sinon.stub().resolves({});
+  const result = await tryInterceptInjectCommand(
+    "!inject on",
+    "session-1",
+    "user-1",
+    makeInjectDeps({ sessionUpdate }),
+    NOOP_LOGGER,
+  );
+  t.truthy(result);
+  t.true(
+    sessionUpdate.calledOnceWith("session-1", "user-1", {
+      injectionPaused: false,
+    }),
+  );
+});
+
+test("tryInterceptInjectCommand on: does not touch runtimeStore", async (t) => {
+  const runtimeSet = sinon.stub().resolves();
+  await tryInterceptInjectCommand(
+    "!inject on",
+    "session-1",
+    "user-1",
+    makeInjectDeps({ runtimeSet }),
+    NOOP_LOGGER,
+  );
+  t.false(runtimeSet.called);
+});
+
+test("tryInterceptInjectCommand global-off: sets injection_enabled false in runtimeStore", async (t) => {
+  const runtimeSet = sinon.stub().resolves();
+  const result = await tryInterceptInjectCommand(
+    "!inject global off",
+    "session-1",
+    "user-1",
+    makeInjectDeps({ runtimeSet }),
+    NOOP_LOGGER,
+  );
+  t.truthy(result);
+  t.true(runtimeSet.calledOnceWith("injection_enabled", false));
+});
+
+test("tryInterceptInjectCommand global-off: does not touch session", async (t) => {
+  const sessionUpdate = sinon.stub().resolves({});
+  await tryInterceptInjectCommand(
+    "!inject global off",
+    "session-1",
+    "user-1",
+    makeInjectDeps({ sessionUpdate }),
+    NOOP_LOGGER,
+  );
+  t.false(sessionUpdate.called);
+});
+
+test("tryInterceptInjectCommand global-on: sets injection_enabled true in runtimeStore", async (t) => {
+  const runtimeSet = sinon.stub().resolves();
+  const result = await tryInterceptInjectCommand(
+    "!inject global on",
+    "session-1",
+    "user-1",
+    makeInjectDeps({ runtimeSet }),
+    NOOP_LOGGER,
+  );
+  t.truthy(result);
+  t.true(runtimeSet.calledOnceWith("injection_enabled", true));
+});
+
+test("tryInterceptInjectCommand global-on: does not touch session", async (t) => {
+  const sessionUpdate = sinon.stub().resolves({});
+  await tryInterceptInjectCommand(
+    "!inject global on",
+    "session-1",
+    "user-1",
+    makeInjectDeps({ sessionUpdate }),
+    NOOP_LOGGER,
+  );
+  t.false(sessionUpdate.called);
+});
+
+test("tryInterceptInjectCommand off: returns error message when session update fails", async (t) => {
+  const sessionUpdate = sinon.stub().rejects(new Error("mongo down"));
+  const result = await tryInterceptInjectCommand(
+    "!inject off",
+    "session-1",
+    "user-1",
+    makeInjectDeps({ sessionUpdate }),
+    NOOP_LOGGER,
+  );
+  t.truthy(result);
+  t.true(result!.message.toLowerCase().includes("failed"));
+});
+
+test("tryInterceptInjectCommand on: returns error message when session update fails", async (t) => {
+  const sessionUpdate = sinon.stub().rejects(new Error("mongo down"));
+  const result = await tryInterceptInjectCommand(
+    "!inject on",
+    "session-1",
+    "user-1",
+    makeInjectDeps({ sessionUpdate }),
+    NOOP_LOGGER,
+  );
+  t.truthy(result);
+  t.true(result!.message.toLowerCase().includes("failed"));
+});
+
+test("tryInterceptInjectCommand global-off: returns error message when runtimeStore set fails", async (t) => {
+  const runtimeSet = sinon.stub().rejects(new Error("config db down"));
+  const result = await tryInterceptInjectCommand(
+    "!inject global off",
+    "session-1",
+    "user-1",
+    makeInjectDeps({ runtimeSet }),
+    NOOP_LOGGER,
+  );
+  t.truthy(result);
+  t.true(result!.message.toLowerCase().includes("failed"));
+});
+
+test("tryInterceptInjectCommand global-on: returns error message when runtimeStore set fails", async (t) => {
+  const runtimeSet = sinon.stub().rejects(new Error("config db down"));
+  const result = await tryInterceptInjectCommand(
+    "!inject global on",
+    "session-1",
+    "user-1",
+    makeInjectDeps({ runtimeSet }),
+    NOOP_LOGGER,
+  );
+  t.truthy(result);
+  t.true(result!.message.toLowerCase().includes("failed"));
+});
+
+test("!extract off does not match inject command parser", (t) => {
+  t.is(matchInjectCommand("!extract off"), null);
+});
+
+test("!inject off does not match extract command parser", (t) => {
+  t.is(matchExtractCommand("!inject off"), null);
+});
+
+test("!extract global off does not match inject command parser", (t) => {
+  t.is(matchInjectCommand("!extract global off"), null);
+});
+
+test("!inject global off does not match extract command parser", (t) => {
+  t.is(matchExtractCommand("!inject global off"), null);
 });

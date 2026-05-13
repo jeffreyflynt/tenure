@@ -34,7 +34,7 @@ cleanup() {
     echo "  - Is port 5757 available? Try: lsof -i :5757"
     echo "  - Check logs: docker compose -f $COMPOSE_FILE logs"
     echo ""
-    echo "To retry: curl -fsSL https://your-domain/install.sh | sh"
+    echo "To retry: curl -fsSL https://raw.githubusercontent.com/jeffreyflynt/tenure/main/scripts/install.sh | sh"
   fi
 }
 trap cleanup EXIT

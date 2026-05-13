@@ -37,6 +37,7 @@ export interface RuntimeConfig {
   onboarding_status: OnboardingStatus;
   strict_model_tiers: boolean;
   extraction_enabled: boolean;
+  injection_enabled: boolean;
   compaction_mode: "aggressive" | "conservative" | "off";
   scope_auto_detect: boolean;
 }
@@ -56,6 +57,7 @@ export const DEFAULTS: RuntimeConfig = {
   onboarding_status: "pending",
   strict_model_tiers: true,
   extraction_enabled: true,
+  injection_enabled: true,
   compaction_mode: "aggressive",
   scope_auto_detect: true,
 };

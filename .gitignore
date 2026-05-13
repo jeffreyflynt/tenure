@@ -9,3 +9,4 @@ dist/
 *.bkup
 start.sh
 coverage/
+*.patch

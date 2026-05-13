@@ -103,6 +103,29 @@ export class BeliefsReader {
 
     const fuzzyOpts = { maxEdits: 1, prefixLength: 2 };
 
+    const filterClauses: Record<string, unknown>[] = [
+      { equals: { path: "user_id", value: userId } },
+      { equals: { path: "resolved_at", value: null } },
+      { equals: { path: "superseded_by", value: null } },
+    ];
+
+    if (scope?.length) {
+      filterClauses.push({
+        in: { path: "scope", value: scope },
+      });
+    }
+
+    const mustNotClauses: Record<string, unknown>[] = [
+      { equals: { path: "type", value: "open_question" } },
+      { equals: { path: "subtype", value: "expertise" } },
+    ];
+
+    if (excludeIds?.size) {
+      for (const id of excludeIds) {
+        mustNotClauses.push({ equals: { path: "_id", value: id } });
+      }
+    }
+
     const searchStage: Record<string, unknown> = {
       index: "beliefs_search",
       compound: {
@@ -145,15 +168,8 @@ export class BeliefsReader {
             },
           },
         ],
-        filter: [
-          { equals: { path: "user_id", value: userId } },
-          { equals: { path: "resolved_at", value: null } },
-          { equals: { path: "superseded_by", value: null } },
-        ],
-        mustNot: [
-          { equals: { path: "type", value: "open_question" } },
-          { equals: { path: "subtype", value: "expertise" } },
-        ],
+        filter: filterClauses,
+        mustNot: mustNotClauses,
       },
     };
     if (scoreDetails) searchStage.scoreDetails = true;
@@ -163,17 +179,8 @@ export class BeliefsReader {
     };
     if (scoreDetails) addFields._scoreDetails = { $meta: "searchScoreDetails" };
 
-    const matchStage: Record<string, unknown> = {
-      ...(scope?.length ? { scope: { $in: scope } } : {}),
-    };
-
-    if (excludeIds?.size) {
-      matchStage._id = { $nin: [...excludeIds] };
-    }
-
     const pipeline: object[] = [
       { $search: searchStage },
-      { $match: matchStage },
       { $addFields: addFields },
       { $match: { _searchScore: { $gte: minScore } } },
       { $limit: limit },

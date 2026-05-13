@@ -89,6 +89,7 @@ export function registerAdminRoutes(
         "strict_model_tiers",
         "compaction_mode",
         "scope_auto_detect",
+        "injection_enabled",
       ]);
 
       if (!safeKeys.has(key)) {

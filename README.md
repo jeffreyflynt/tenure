@@ -3,7 +3,7 @@
 ![Build](https://github.com/jeffreyflynt/tenure/actions/workflows/ci.yml/badge.svg)
 ![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)
 ![Docker](https://img.shields.io/badge/docker-ready-blue?logo=docker)
-![arXiv](https://img.shields.io/badge/arXiv-2505.XXXXX-b31b1b.svg)
+![arXiv](https://img.shields.io/badge/arXiv-2605.11325-b31b1b.svg)
 
 _Stop briefing strangers. Start working with a model that already knows your work._
 
@@ -20,7 +20,7 @@ automatically. Point any OpenAI-compatible client at `localhost:5757` and every 
 - **Instant import**: Drop in an existing skills file, bio, or notes doc and Tenure seeds your world model immediately, no cold start, no manual entry.
 - **Transparent to your tools**: Point any OpenAI-compatible client at `localhost:5757/v1` and it works; no plugins, no custom integrations. The client doesn't know Tenure exists.
 - **Structured beliefs, not transcript dumps**: Organizes what it knows about you into Preferences, Decisions, Entities, Open Questions, and Expertise. Injects a curated slice per session, not raw history. Stays fast and cheap at scale.
-- **Full control**: Every belief is visible, editable, and auditable at `/beliefs`. Pin what matters, correct what's wrong, pause extraction for sessions you don't want recorded.
+- **Full control**: Every belief is visible, editable, and auditable at `/beliefs`. Pin what matters, correct what's wrong. Pause extraction globally from Settings, or per-session with `!extract off` directly in your chat client, without leaving your workflow.
 - **Compaction you can tune**: History and belief compaction run automatically, with aggressive, conservative, and off modes configurable from the admin UI.
 - **Private and local**: Runs entirely on your machine. Your context never leaves `localhost`. Belief content is encrypted at rest. See [docs/security.md](docs/security.md).
 - **Portable**: Export your entire world model as a passphrase-encrypted archive and restore it on any machine.
@@ -193,9 +193,24 @@ Tenure sets your scope automatically from your first message. You can also set i
 
 Without scope, Tenure still works — it just retrieves across all your beliefs, which can introduce noise when your domains are very different from each other.
 
+To pause extraction for a session without opening Settings:
+
+```
+!extract off          ← stops recording this session
+!extract on           ← resumes
+!extract global off   ← pauses everywhere
+```
+
 ## Token Efficiency
 
 Tenure reduces token costs in two directions. On the supply side, the belief store stays compact through continuous compaction, beliefs are retrieved selectively rather than injected in full, and prompt caching on the static and belief tiers means you pay for context injection once per session. On the demand side, a model that knows to ask before executing (because that preference is in your world model) prevents the most expensive failure mode: a long, confident response that went the wrong direction. A two-sentence clarifying question that costs 50 tokens and prevents a 5,000-token miss is a 99% reduction on that exchange.
+
+The system prompt is long by design: each instruction is written out explicitly
+so the model does not need to reason over it, protecting reasoning tokens for
+the actual task. Prompt caching means that length is paid for once per session
+rather than on every turn. See [docs/prompt-caching.md](docs/prompt-caching.md)
+for details on minimum token thresholds and how the static and belief tiers are
+structured to meet them.
 
 ## Reproducing the Evaluation
 
@@ -220,3 +235,7 @@ See [docs/contributing.md](docs/contributing.md).
 ## License
 
 MIT
+
+```
+
+```

@@ -12,6 +12,8 @@ export interface Session {
   turnCounter: number;
   createdAt: Date;
   lastUsedAt: Date;
+  extractionPaused?: boolean;
+  injectionPaused?: boolean;
 }
 
 export interface SessionPatch {
@@ -19,6 +21,8 @@ export interface SessionPatch {
   providerId?: string;
   model?: string;
   activeScope?: string[];
+  extractionPaused?: boolean;
+  injectionPaused?: boolean;
 }
 
 export class SessionManager {

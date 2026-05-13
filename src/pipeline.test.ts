@@ -24,6 +24,7 @@ import {
 import { SCENARIOS } from "./__fixtures__/conversations.js";
 import type { PersonaCache } from "./context/personaCache.js";
 import { RuntimeConfigStore } from "./config/runtime.js";
+import { ErrorLogger } from "./errors/logger.js";
 
 const test = anyTest.serial as TestFn;
 
@@ -88,15 +89,6 @@ test.afterEach(async () => {
   ]);
 });
 
-/**
- * Insert the canonical belief set for USER_ID.
- * Uses replaceOne+upsert so it is safe to call multiple times.
- *
- * Covers every BeliefsReader read path:
- *   listAlwaysOn            → pinned:true OR type:"PREFERENCE"
- *   listByScope             → scope includes "coding"
- *   listPinnedOpenQuestions → type:"OPEN_QUESTION" + pinned:true
- */
 async function seedBeliefs(): Promise<void> {
   const col = db.collection<Belief>("beliefs");
   const now = new Date();
@@ -346,6 +338,9 @@ function buildReplayApp(responseContents: string[]): {
     userId: USER_ID,
     extractionWorker,
     runtimeStore: runtimeStore as unknown as RuntimeConfigStore,
+    errorLogger: {
+      log: sinon.stub().resolves(),
+    } as unknown as ErrorLogger,
   };
 
   const app = Fastify();
@@ -538,6 +533,9 @@ test("pipeline: system prompt from client is forwarded to provider", async (t) =
       load: sinon.stub().resolves({ extraction_enabled: true }),
       set: sinon.stub().resolves(),
     } as unknown as RuntimeConfigStore,
+    errorLogger: {
+      log: sinon.stub().resolves(),
+    } as unknown as ErrorLogger,
   });
   await app.ready();
 
@@ -603,6 +601,9 @@ test("pipeline: seeded beliefs appear in the system prompt", async (t) => {
       load: sinon.stub().resolves({ extraction_enabled: true }),
       set: sinon.stub().resolves(),
     } as unknown as RuntimeConfigStore,
+    errorLogger: {
+      log: sinon.stub().resolves(),
+    } as unknown as ErrorLogger,
   });
   await app.ready();
 
@@ -1246,6 +1247,9 @@ test("long session: topic drift, always-on injection, world model updates, compa
       load: sinon.stub().resolves({ extraction_enabled: true }),
       set: sinon.stub().resolves(),
     } as unknown as RuntimeConfigStore,
+    errorLogger: {
+      log: sinon.stub().resolves(),
+    } as unknown as ErrorLogger,
   });
   await app.ready();
 

@@ -13,6 +13,7 @@ export interface ExtractionJobPayload {
   scope: string[];
   source_model: string;
   source_label?: string;
+  client_category?: string;
 }
 
 export interface ExtractionJob {

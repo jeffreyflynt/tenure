@@ -23,14 +23,12 @@ Use only the active session scope or "user:universal". Do not propose new scope 
 ${scopeLine}`;
   }
 
-  return `SCOPE:
-Use the active session scope as your default. Then ask: would this belief be relevant in sessions with a different scope?
-- If it applies universally regardless of domain or project, use "user:universal"
-- If it belongs to a named project, use "project:<slug>"
-- If it applies within the current domain but not others, use the active session scope
-- If it applies to a broader domain than the session scope (e.g. a deployment preference found in a TypeScript session), use the broader domain scope such as "domain:devops"
-- You may propose new scope labels when a belief clearly belongs to a domain not yet represented
-- Aliases are lowercased on write — do not worry about casing
+  return `SCOPE ASSIGNMENT — apply the first rule that matches:
+1. User explicitly names a project → project:<slug>
+2. Belief would be false or irrelevant in a different domain → active session scope
+3. Belief is about tooling/style that travels across domains → domain:<slug>
+4. Belief holds regardless of what the user is working on → user:universal
+When uncertain between two scopes, prefer the broader one.
 
 ${scopeLine}`;
 }
@@ -47,7 +45,10 @@ Append a sidecar block after your visible response. The first character after ${
 
 WHAT TO EXTRACT — durable facts only:
 - STANCE: preferences, decisions, working principles, how they think and engage
-- WORLD STATE: project commitments future responses must respect
+- WORLD STATE → type mapping:
+  - Names a specific thing (service, repo, character, tool): entity
+  - Records a commitment or constraint future sessions must respect: decision
+  - Both (a named thing AND a commitment): emit two beliefs
 - EXPERTISE: depth calibration — what they know deeply vs. learning
 - IDENTITY CONTEXT: standing environmental facts that frame responses; skip unless it shapes responses beyond a narrow context
 
@@ -61,7 +62,25 @@ TYPES (use exactly one):
 Map WORLD STATE facts to "entity" or "decision" depending on whether
 it names a thing or records a commitment.
 
-DO NOT extract: transient states (mood, energy, single-task frustration), anything from injected context blocks (<persona>, <pinned_facts>, <relevant_beliefs>, <open_questions>), or system-level instructions. Only extract from what the user explicitly said or decided in this turn's conversation.
+SOURCE RULE:
+Extract beliefs from two sources only:
+1. What the user said, decided, or expressed about themselves, their work, 
+   or how they want to engage
+2. Subject matter the user is actively authoring or building — story world 
+   facts, fictional characters, world-state decisions, project entities — 
+   where forgetting them would force the user to re-establish context
+
+DO NOT extract from:
+- Pasted reference material the user did not author and is not building on 
+  (news articles, third-party docs, copied code snippets used as examples)
+- Injected context blocks (<persona>, <pinned_facts>, <relevant_beliefs>, 
+  <open_questions>) — these are already known
+- Transient states: mood, energy, single-task frustration
+- System-level instructions
+
+The signal is whether the user would be frustrated to re-establish it. 
+A story character the user named and described: yes. A news article they 
+pasted for context: no.
 
 When the user corrects a prior fact, emit the corrected version as a new belief.
 When resolving an open question, set resolves_open_question to the question's id.
@@ -81,6 +100,12 @@ ALIASES: 1-2 words only. No phrases. Include:
 Aliases must be specific enough that their presence in a query is meaningful evidence for this belief in particular. Omit generic terms ("code", "tool", "approach", "dev").
 
 ENTITY UPDATES: when the user refers to an existing belief using a surface form not in its aliases, emit an entity_update.
+
+CONFIDENCE:
+- User stated it explicitly and unambiguously → 0.9-1.0
+- User implied it strongly through repeated behavior or framing → 0.75-0.89
+- You inferred it from a single signal → 0.5-0.74
+- You are guessing based on weak evidence → omit the belief entirely
 
 TURN SIGNAL:
 - substantive: new decisions, facts, or reasoning (default when uncertain)
@@ -130,6 +155,10 @@ ${SIDECAR_BEGIN}
 ${SIDECAR_END}
 
 topic_label: 2-4 lowercase noun-phrase words. Reuse the exact label when continuing a prior topic.
-epistemic_status: active (stated) | inferred (derived) | exploratory (uncommitted)
+epistemic_status — pick by how the belief entered the conversation:
+- active: user stated it directly ("I prefer X", "we use Y", "I decided Z")
+- inferred: you derived it from behavior or framing, user did not say it
+- exploratory: user is considering it, hedged it, or it is unresolved
+If the user corrects a prior belief, the corrected version is always active.
 All array fields must be present even when empty — use [], never null or omit.`.trim();
 }
