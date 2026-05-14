@@ -4,9 +4,22 @@ All notable changes to OrgForge will be documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## Changelog Entry
-
 ---
+
+## [1.0.5] - 2026-05-15
+
+### Added
+
+- **`!inject` commands documented in settings.md**: The Injection section has been added to `settings.md`, covering all four `!inject` commands (`!inject off`, `!inject on`, `!inject global off`, `!inject global on`), their effects, and the interaction with `!extract off` for fully clean sessions.
+- **Scope command documentation in settings.md**: A "Setting scope manually" subsection has been added under Scope, documenting the `!scope` and `set scope` command syntax, multi-scope usage, all valid scope format rules, and the automatic hierarchy expansion behaviour.
+- **`entrypoint.sh` `init` mode**: The entrypoint script now supports an `init` subcommand that writes the bundled `docker-compose.yml` to `TENURE_HOME`, generates a random MongoDB password, and writes a `.env` file with credentials. Both writes are skipped if the target files already exist.
+- **`TENURE_HOME` environment variable support in `entrypoint.sh`**: The entrypoint now reads `TENURE_HOME` from the environment, defaulting to `/app/.tenure`, instead of hardcoding the path.
+- **`docker-compose.yml` copied into container image**: The Dockerfile now copies `docker-compose.yml` into `/app/docker-compose.yml` so it is available for the `init` entrypoint path.
+
+### Changed
+
+- **README rewritten**: The README has been substantially revised with updated framing, a condensed problem statement, an expanded "Why This Is Different" section, a new "Trust and Ownership" section, and a streamlined structure throughout. The title has been shortened to remove the explicit client name list.
+- **`settings.md` Advanced section trimmed**: The `History token cap` setting and `History compaction mode` table have been removed from the Advanced section.
 
 ## [1.0.4] - 2026-05-14
 
