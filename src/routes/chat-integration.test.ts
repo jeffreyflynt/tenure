@@ -279,20 +279,6 @@ test("returns 200 with a well-formed chat completion envelope", async (t) => {
   t.is(body.usage.total_tokens, 30);
 });
 
-test("response includes tenure metadata", async (t) => {
-  const { app } = await buildApp(makeProviderResponse("Hi!"));
-  const res = await post(app, {
-    messages: [{ role: "user", content: "Hello" }],
-    metadata: { session_id: SESSION_ID, scope: ["work"] },
-  });
-  const body = JSON.parse(res.body);
-  t.truthy(body.tenure);
-  t.is(body.tenure.session_id, SESSION_ID);
-  t.truthy(body.tenure.turn_id);
-  t.deepEqual(body.tenure.scope, ["work"]);
-  t.is(body.tenure.parse_status, "missing");
-});
-
 test("sidecar is stripped from visible content", async (t) => {
   const sidecar = makeSidecar("substantive");
   const { app } = await buildApp(
@@ -304,25 +290,6 @@ test("sidecar is stripped from visible content", async (t) => {
   const body = JSON.parse(res.body);
   t.is(body.choices[0].message.content, "The answer is 42.");
   t.false(body.choices[0].message.content.includes(SIDECAR_BEGIN));
-});
-
-test("parse_status is 'parsed' when sidecar is well-formed", async (t) => {
-  const sidecar = makeSidecar("acknowledgment");
-  const { app } = await buildApp(makeProviderResponse(`Got it.\n${sidecar}`));
-  const res = await post(app, {
-    messages: [{ role: "user", content: "OK" }],
-  });
-  const body = JSON.parse(res.body);
-  t.is(body.tenure.parse_status, "parsed");
-});
-
-test("parse_status is 'missing' when provider returns no sidecar", async (t) => {
-  const { app } = await buildApp(makeProviderResponse("Plain response."));
-  const res = await post(app, {
-    messages: [{ role: "user", content: "Hello" }],
-  });
-  const body = JSON.parse(res.body);
-  t.is(body.tenure.parse_status, "missing");
 });
 
 test("turn is written to history after a successful call", async (t) => {
@@ -351,18 +318,19 @@ test("extraction job is enqueued after a successful call", async (t) => {
 
 test("turn and job share the same turnId", async (t) => {
   const { app } = await buildApp(makeProviderResponse("Linked."));
-  const res = await post(app, {
+  await post(app, {
     messages: [{ role: "user", content: "Link" }],
   });
-  const { tenure } = JSON.parse(res.body);
 
   const turn = await waitForDoc(db.collection("turns"), {
-    _id: tenure.turn_id,
-  });
-  const job = await waitForDoc(db.collection("jobs"), {
-    turn_id: tenure.turn_id,
+    sessionId: SESSION_ID,
+    userMessage: "Link",
   });
   t.truthy(turn);
+
+  const job = await waitForDoc(db.collection("jobs"), {
+    turn_id: turn!._id as string,
+  });
   t.truthy(job);
   t.is(turn!._id, job!.turn_id);
 });
@@ -561,108 +529,6 @@ test("returns 502 when provider is not registered", async (t) => {
   t.is(res.statusCode, 502);
   const body = JSON.parse(res.body);
   t.is(body.error.type, "provider_not_configured");
-});
-
-test("scope from metadata takes precedence over session activeScope", async (t) => {
-  const sessions = new SessionManager(db);
-  await sessions.getOrCreate("sess-scope", USER_ID);
-  await sessions.update("sess-scope", USER_ID, {
-    providerId: PROVIDER_ID,
-    model: MODEL,
-    activeScope: ["default-scope"],
-  });
-
-  const adapter = makeStubAdapter(makeProviderResponse("Scoped."));
-  const registry = new ProviderRegistry();
-  registry.register(adapter);
-
-  const app = Fastify();
-  registerChatRoute(app, {
-    sessions,
-    history: new HistoryManager(db),
-    context: new ContextBuilder(
-      {
-        listByScope: sinon.stub().resolves([]),
-        listPinnedOpenQuestions: sinon.stub().resolves([]),
-      } as any,
-      { get: sinon.stub().resolves(null) } as any,
-    ),
-    providers: registry,
-    jobs: new ExtractionJobQueue(db),
-    userId: USER_ID,
-    extractionWorker: {
-      processById: sinon.stub().resolves(),
-      sweep: sinon.stub().resolves(0),
-    } as unknown as ExtractionWorker,
-    runtimeStore: {
-      load: sinon.stub().resolves({ extraction_enabled: true }),
-      set: sinon.stub().resolves(),
-    } as unknown as RuntimeConfigStore,
-    errorLogger: {
-      log: sinon.stub().resolves(),
-    } as unknown as ErrorLogger,
-  });
-  await app.ready();
-
-  const res = await post(
-    app,
-    {
-      messages: [{ role: "user", content: "Hi" }],
-      metadata: { session_id: "sess-scope", scope: ["override-scope"] },
-    },
-    { "x-session-id": "sess-scope" },
-  );
-  const body = JSON.parse(res.body);
-  t.deepEqual(body.tenure.scope, ["override-scope"]);
-});
-
-test("falls back to session activeScope when metadata scope is absent", async (t) => {
-  const sessions = new SessionManager(db);
-  await sessions.getOrCreate("sess-fallback", USER_ID);
-  await sessions.update("sess-fallback", USER_ID, {
-    providerId: PROVIDER_ID,
-    model: MODEL,
-    activeScope: ["session-scope"],
-  });
-
-  const registry = new ProviderRegistry();
-  registry.register(makeStubAdapter(makeProviderResponse("Fallback.")));
-
-  const app = Fastify();
-  registerChatRoute(app, {
-    sessions,
-    history: new HistoryManager(db),
-    context: new ContextBuilder(
-      {
-        listByScope: sinon.stub().resolves([]),
-        listPinnedOpenQuestions: sinon.stub().resolves([]),
-      } as any,
-      { get: sinon.stub().resolves(null) } as any,
-    ),
-    providers: registry,
-    jobs: new ExtractionJobQueue(db),
-    userId: USER_ID,
-    extractionWorker: {
-      processById: sinon.stub().resolves(),
-      sweep: sinon.stub().resolves(0),
-    } as unknown as ExtractionWorker,
-    runtimeStore: {
-      load: sinon.stub().resolves({ extraction_enabled: true }),
-      set: sinon.stub().resolves(),
-    } as unknown as RuntimeConfigStore,
-    errorLogger: {
-      log: sinon.stub().resolves(),
-    } as unknown as ErrorLogger,
-  });
-  await app.ready();
-
-  const res = await post(
-    app,
-    { messages: [{ role: "user", content: "Hi" }] },
-    { "x-session-id": "sess-fallback" },
-  );
-  const body = JSON.parse(res.body);
-  t.deepEqual(body.tenure.scope, ["session-scope"]);
 });
 
 test("response is still returned when side-effect writes fail", async (t) => {
@@ -968,7 +834,6 @@ test("streaming: turn and job share the same turnId", async (t) => {
     userMessage: "Link stream",
   });
   t.truthy(turn);
-
   const job = await waitForDoc(db.collection("jobs"), {
     turn_id: turn!._id as string,
   });
@@ -1461,17 +1326,24 @@ test("scope command mid-session changes scope for subsequent turn", async (t) =>
   const registry = new ProviderRegistry();
   registry.register(adapter);
 
+  const contextBuild = sinon.stub().resolves({
+    personaPrelude: "",
+    pinnedFactsJson: "[]",
+    expandedQuery: "",
+    queryWasNoisy: false,
+    relevantBeliefsJson: "[]",
+    openQuestionsJson: "[]",
+    beliefCount: 0,
+    questionCount: 0,
+    truncated: false,
+    searchScores: [],
+  });
+
   const app = Fastify();
   registerChatRoute(app, {
     sessions,
     history: new HistoryManager(db),
-    context: new ContextBuilder(
-      {
-        listByScope: sinon.stub().resolves([]),
-        listPinnedOpenQuestions: sinon.stub().resolves([]),
-      } as any,
-      { get: sinon.stub().resolves(null) } as any,
-    ),
+    context: { build: contextBuild } as any,
     providers: registry,
     jobs: new ExtractionJobQueue(db),
     userId: USER_ID,
@@ -1495,14 +1367,14 @@ test("scope command mid-session changes scope for subsequent turn", async (t) =>
     { "x-session-id": "sess-mid-change" },
   );
 
-  const res = await post(
+  await post(
     app,
     { messages: [{ role: "user", content: "What should I write next?" }] },
     { "x-session-id": "sess-mid-change" },
   );
 
-  const body = JSON.parse(res.body);
-  t.deepEqual(body.tenure.scope, ["domain:writing"]);
+  t.true(contextBuild.calledOnce);
+  t.deepEqual(contextBuild.firstCall.args[1], ["domain:writing"]);
 });
 
 test("streaming: !scope command returns non-streaming JSON even when stream:true", async (t) => {
@@ -1542,17 +1414,24 @@ test("first-turn scope detection runs when scopeDetector is configured and activ
   const registry = new ProviderRegistry();
   registry.register(mainAdapter);
 
+  const contextBuild = sinon.stub().resolves({
+    personaPrelude: "",
+    pinnedFactsJson: "[]",
+    expandedQuery: "",
+    queryWasNoisy: false,
+    relevantBeliefsJson: "[]",
+    openQuestionsJson: "[]",
+    beliefCount: 0,
+    questionCount: 0,
+    truncated: false,
+    searchScores: [],
+  });
+
   const app = Fastify();
   registerChatRoute(app, {
     sessions,
     history: new HistoryManager(db),
-    context: new ContextBuilder(
-      {
-        listByScope: sinon.stub().resolves([]),
-        listPinnedOpenQuestions: sinon.stub().resolves([]),
-      } as any,
-      { get: sinon.stub().resolves(null) } as any,
-    ),
+    context: { build: contextBuild } as any,
     providers: registry,
     jobs: new ExtractionJobQueue(db),
     userId: USER_ID,
@@ -1579,24 +1458,22 @@ test("first-turn scope detection runs when scopeDetector is configured and activ
     app,
     {
       messages: [
-        {
-          role: "user",
-          content: "how should I configure TypeScript strict mode?",
-        },
+        { role: "user", content: "How do I structure my TypeScript project?" },
       ],
     },
     { "x-session-id": "sess-detect" },
   );
 
   t.is(res.statusCode, 200);
-  const body = JSON.parse(res.body);
+  t.is(JSON.parse(res.body).choices[0].message.content, "Main reply.");
 
-  t.deepEqual(body.tenure.scope, ["domain:code"]);
+  t.true(detectorCall.calledOnce);
+
+  t.true(contextBuild.calledOnce);
+  t.deepEqual(contextBuild.firstCall.args[1], ["domain:code"]);
 
   const updated = await sessions.get("sess-detect", USER_ID);
   t.deepEqual(updated!.activeScope, ["domain:code"]);
-
-  t.true(detectorCall.calledOnce);
 });
 
 test("first-turn scope detection does not run when activeScope is already set", async (t) => {
@@ -1660,7 +1537,6 @@ test("first-turn scope detection does not run when activeScope is already set", 
 
   const body = JSON.parse(res.body);
 
-  t.deepEqual(body.tenure.scope, ["domain:code"]);
   t.false(detectorCall.called);
 });
 
@@ -1712,7 +1588,6 @@ test("first-turn scope detection does not run when scopeDetector is not configur
 
   t.is(res.statusCode, 200);
   const body = JSON.parse(res.body);
-  t.deepEqual(body.tenure.scope, []);
 });
 
 test("first-turn scope detection failure degrades gracefully and still returns response", async (t) => {
@@ -1770,8 +1645,6 @@ test("first-turn scope detection failure degrades gracefully and still returns r
 
   t.is(res.statusCode, 200);
   t.is(JSON.parse(res.body).choices[0].message.content, "Reply anyway.");
-
-  t.deepEqual(JSON.parse(res.body).tenure.scope, []);
 });
 
 test("first-turn scope detection only fires on turnCounter 0", async (t) => {
@@ -2040,28 +1913,6 @@ test("!extract global off calls runtimeStore.set with extraction_enabled false",
   t.is(res.statusCode, 200);
   t.true(runtimeSet.calledWith("extraction_enabled", false));
   t.false((adapter.call as sinon.SinonStub).called);
-});
-
-test("!extract command tenure parse_status is missing since no LLM fired", async (t) => {
-  const { app } = await buildApp(makeProviderResponse("Unused."));
-
-  const res = await post(app, {
-    messages: [{ role: "user", content: "!extract off" }],
-  });
-
-  const body = JSON.parse(res.body);
-  t.is(body.tenure.parse_status, "missing");
-});
-
-test("!extract command tenure degraded is false", async (t) => {
-  const { app } = await buildApp(makeProviderResponse("Unused."));
-
-  const res = await post(app, {
-    messages: [{ role: "user", content: "!extract off" }],
-  });
-
-  const body = JSON.parse(res.body);
-  t.false(body.tenure.degraded);
 });
 
 test("extraction worker NOT called on subsequent turn when session extractionPaused is true", async (t) => {
@@ -2505,17 +2356,6 @@ test("!inject global off calls runtimeStore.set with injection_enabled false", a
   t.is(res.statusCode, 200);
   t.true(runtimeSet.calledWith("injection_enabled", false));
   t.false((adapter.call as sinon.SinonStub).called);
-});
-
-test("!inject command tenure parse_status is missing since no LLM fired", async (t) => {
-  const { app } = await buildApp(makeProviderResponse("Unused."));
-
-  const res = await post(app, {
-    messages: [{ role: "user", content: "!inject off" }],
-  });
-
-  const body = JSON.parse(res.body);
-  t.is(body.tenure.parse_status, "missing");
 });
 
 test("streaming: !inject off returns non-streaming JSON even when stream:true", async (t) => {

@@ -4,6 +4,31 @@ All notable changes to OrgForge will be documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Changelog Entry
+
+---
+
+## [1.0.4] - 2026-05-14
+
+### Added
+
+- **Animated loading indicator on onboarding submission**: The "Extracting beliefs..." text is now replaced with a three-dot bounce animation and the Tenure logo while the onboarding completion request is in flight.
+- **Tenure logo on onboarding error state**: The logo is now shown above the extraction failure and zero-beliefs error messages.
+- **`extractJsonBlock` consolidated into shared module**: `onboarding.ts` now imports `extractJsonBlock` from `src/extraction/extractJson.ts` instead of maintaining a local copy.
+
+### Changed
+
+- **`extractJsonBlock` hardened**: Now handles trailing commas via `stripTrailingCommas`, normalizes Unicode curly quotes and smart apostrophes via `normalizeQuotes`, and uses a brace-depth-tracking `extractOutermostObject` instead of a simple regex match. Multiple fallback parse attempts are made before returning `null`.
+- **`tenure` metadata field removed from chat completion responses**: The `tenure` envelope (`session_id`, `turn_id`, `scope`, `parse_status`, `degraded`, `context`) is no longer included in non-streaming chat completion responses. Tests updated accordingly.
+- **`injectionEnabled` now suppresses injection for IDE clients**: IDE clients detected via `ua-parser-js` now have injection disabled by default, matching the existing extraction suppression behaviour.
+- **Compacted history no longer injected into conversation messages**: `renderCompacted` is no longer called on the hot path; compacted turns are not prepended to the outgoing message array.
+- **`EMPTY_RENDERED` import removed from `chat.ts`**: No longer needed after the compacted history removal.
+- **Static assets copied into dist image**: `COPY src/static ./dist/static` added to the Dockerfile so static files are available at runtime.
+
+### Removed
+
+- **`parse_status` and `degraded` assertions removed from pipeline and chat integration tests**: Tests no longer assert on `tenure.parse_status` or `tenure.degraded` since the metadata field has been dropped from responses.
+
 ---
 
 ## [1.0.3] - 2026-05-13

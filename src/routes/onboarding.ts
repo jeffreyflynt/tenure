@@ -5,6 +5,7 @@ import type { ExtractionJobQueue } from "../jobs/queue.js";
 import type { RuntimeConfigStore } from "../config/runtime.js";
 import { checkModelTier } from "../providers/tiers.js";
 import type { ExtractionWorkerLike } from "../extraction/worker.js";
+import { extractJsonBlock } from "../extraction/extractJson.js";
 
 export interface OnboardingDeps {
   providers: ProviderRegistry;
@@ -216,29 +217,6 @@ function buildExtractionPrompt(
     `tag from the preceding [scope: ...] line to every belief extracted from that answer.\n\n` +
     `Transcript:\n\n${transcript}`
   );
-}
-
-function extractJsonBlock(raw: string): string | null {
-  const stripped = raw
-    .replace(/^```(?:json)?\s*/im, "")
-    .replace(/\s*```\s*$/im, "")
-    .trim();
-
-  try {
-    JSON.parse(stripped);
-    return stripped;
-  } catch {}
-
-  const match = stripped.match(/\{[\s\S]*\}/);
-  if (match) {
-    try {
-      JSON.parse(match[0]);
-      return match[0];
-    } catch {
-      return null;
-    }
-  }
-  return null;
 }
 
 interface ParsedBelief {
@@ -970,7 +948,26 @@ async function skipAll() {
 }
 
 async function submit() {
-  set(\`<div class="status"><p>Extracting beliefs…</p></div>\`);
+  set(\`
+   <img src="/assets/tenure-logo.png" alt="Tenure" class="logo">
+    <div class="status">
+      <div style="display:flex;gap:6px;justify-content:center;margin-bottom:1.25rem">
+        <span style="width:8px;height:8px;border-radius:50%;background:var(--accent);
+          animation:bounce 1.2s ease-in-out infinite;animation-delay:0s"></span>
+        <span style="width:8px;height:8px;border-radius:50%;background:var(--accent);
+          animation:bounce 1.2s ease-in-out infinite;animation-delay:0.2s"></span>
+        <span style="width:8px;height:8px;border-radius:50%;background:var(--accent);
+          animation:bounce 1.2s ease-in-out infinite;animation-delay:0.4s"></span>
+      </div>
+      <p id="wait-msg"></p>
+    </div>
+    <style>
+      @keyframes bounce {
+        0%, 80%, 100% { transform: translateY(0); opacity: 0.4; }
+        40% { transform: translateY(-8px); opacity: 1; }
+      }
+    </style>
+  \`);
   try {
     const res = await fetch(COMPLETE_URL, {
       method: "POST",
@@ -982,6 +979,7 @@ async function submit() {
 
     if (data.parse_failed || data.belief_count === 0) {
       set(\`
+        <img src="/assets/tenure-logo.png" alt="Tenure" class="logo">
         <div class="status">
           <h2>\${data.parse_failed ? "Extraction couldn't parse output" : "No beliefs extracted"}</h2>
           <p>Your answers were recorded but no beliefs were saved.</p>

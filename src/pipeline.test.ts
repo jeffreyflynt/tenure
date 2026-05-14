@@ -393,11 +393,6 @@ for (const scenario of SCENARIOS) {
         ft.expect.visible,
         `${ft.label}: visible content`,
       );
-      t.is(
-        body.tenure.parse_status,
-        ft.expect.parseStatus,
-        `${ft.label}: parse_status`,
-      );
     }
 
     const turns = await waitForTurns(
@@ -440,11 +435,6 @@ for (const scenario of SCENARIOS) {
     t.is(jobs.length, scenario.expectAfterAll.jobCount, "job count");
 
     for (let i = 0; i < scenario.turns.length; i++) {
-      t.is(
-        jobs[i].payload.parse_status,
-        scenario.turns[i].expect.parseStatus,
-        `job ${i}: parseStatus`,
-      );
       t.is(jobs[i].status, "pending", `job ${i}: status is pending`);
     }
   });
