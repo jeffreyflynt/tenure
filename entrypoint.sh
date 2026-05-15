@@ -17,7 +17,7 @@ if [ "$1" = "init" ]; then
   fi
 
   if [ ! -f "$TENURE_HOME/.env" ]; then
-    MONGO_PASS=$(openssl rand -base64 24 | tr -d '/+=' | head -c 32)
+    MONGO_PASS=$(node -e "process.stdout.write(require('crypto').randomBytes(24).toString('base64').replace(/[\/+=]/g,'').slice(0,32))")
     printf 'MONGO_INITDB_ROOT_USERNAME=tenure\nMONGO_INITDB_ROOT_PASSWORD=%s\nTENURE_PORT=5757\n' \
       "$MONGO_PASS" > "$TENURE_HOME/.env"
     chmod 600 "$TENURE_HOME/.env"
