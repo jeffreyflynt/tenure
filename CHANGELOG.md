@@ -6,6 +6,14 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.0.12] - 2026-05-18
+
+### Changed
+
+- **`publish-openclaw-plugin.yml`**: Automate version updates to package.json.
+
+---
+
 ## [1.0.11] - 2026-05-18
 
 ### Changed
