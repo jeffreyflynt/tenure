@@ -4,8 +4,9 @@ permissions:
   id-token: write
 
 on:
-  release:
-    types: [published]
+  push:
+    tags:
+      - "v*"
   workflow_dispatch:
     inputs:
       dry_run:
