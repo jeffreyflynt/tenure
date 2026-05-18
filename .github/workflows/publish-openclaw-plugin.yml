@@ -1,5 +1,8 @@
 name: Publish OpenClaw Plugin
 
+permissions:
+  id-token: write
+
 on:
   release:
     types: [published]
@@ -20,6 +23,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-node@v6
         with:
@@ -48,21 +53,57 @@ jobs:
         run: |
           test -f skills/tenure/SKILL.md || (echo "skills/tenure/SKILL.md missing" && exit 1)
 
+      - name: Resolve version
+        id: version
+        run: |
+          if [[ "${{ github.event_name }}" == "release" ]]; then
+            TAG="${{ github.event.release.tag_name }}"
+            echo "value=${TAG#v}" >> "$GITHUB_OUTPUT"
+          else
+            # For manual runs, fall back to the version already in package.json
+            echo "value=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Sync version from release tag
         if: github.event_name == 'release'
-        run: |
-          TAG="${{ github.event.release.tag_name }}"
-          VERSION="${TAG#v}"
-          npm version "$VERSION" --no-git-tag-version
+        run: npm version "${{ steps.version.outputs.value }}" --no-git-tag-version
 
       - name: Publish to npm
         if: ${{ !inputs.dry_run }}
-        run: npm publish --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --access public --provenance
 
-      - name: Dry run publish
+      - name: Dry run publish (npm)
         if: ${{ inputs.dry_run }}
         run: npm publish --dry-run --access public
+
+      - name: Install ClaWHub CLI
+        run: npm install -g clawhub
+
+      - name: Publish to ClaWHub
+        if: ${{ !inputs.dry_run }}
+        run: |
+          clawhub package publish "jeffreyflynt/tenure@main" \
+            --clawscan-note "Injects agent-scope headers for multi-agent isolation and forwards requests to a user-run localhost Tenure proxy (port 5757). No data leaves localhost except to the user's configured Anthropic or OpenAI endpoint." \
+            --source-repo https://github.com/jeffreyflynt/tenure \
+            --source-commit $(git rev-parse HEAD) \
+            --version ${{ steps.version.outputs.value }} \
+            --owner @tenureai \
+            --name tenure \
+            --source-path integrations/openclaw
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          CLAWHUB_TOKEN: ${{ secrets.CLAWHUB_TOKEN }}
+
+      - name: Dry run publish (ClaWHub)
+        if: ${{ inputs.dry_run }}
+        run: |
+          clawhub package publish "jeffreyflynt/tenure@main" \
+            --clawscan-note "Injects agent-scope headers for multi-agent isolation and forwards requests to a user-run localhost Tenure proxy (port 5757). No data leaves localhost except to the user's configured Anthropic or OpenAI endpoint." \
+            --source-repo https://github.com/jeffreyflynt/tenure \
+            --source-commit $(git rev-parse HEAD) \
+            --version ${{ steps.version.outputs.value }} \
+            --owner @tenureai \
+            --name tenure \
+            --source-path integrations/openclaw \
+            --dry-run
+        env:
+          CLAWHUB_TOKEN: ${{ secrets.CLAWHUB_TOKEN }}
