@@ -6,6 +6,14 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.0.11] - 2026-05-18
+
+### Changed
+
+- **`package.json`**: Install missing dependencies `@typescript/native-preview` & `tsx`.
+
+---
+
 ## [1.0.10] - 2026-05-18
 
 ### Changed
