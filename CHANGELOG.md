@@ -6,6 +6,20 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.0.8] - 2026-05-18
+
+### Changed
+
+- **OpenClaw plugin dev dependencies pinned to exact versions**: `@types/node` bumped to `25.6.0`, `ava` to `8.0.0`, `openclaw` to `^2026.5.18`, and `typescript` to `6.0.3`.
+- **`openclaw` dependency tree updated**: Bumped internal packages including `@agentclientprotocol/sdk` to `0.21.1`, `@earendil-works/pi-*` packages to `0.75.1`, `@google/genai` to `2.3.0`, `@clack/core` to `1.3.1`, `@clack/prompts` to `1.4.0`, `kysely` to `0.29.1`, `openai` to `6.38.0`, `openclaw` to `2026.5.18`, `undici` to `8.3.0`, `tokenjuice` to `0.7.1`, `ws` to `8.20.1`, and `typescript` to `6.0.3`.
+- **Proxy dependencies replaced in `openclaw`**: `proxy-agent`, `global-agent`, `pac-proxy-agent`, `pac-resolver`, and related transitive packages removed. Replaced with the lighter `@openclaw/proxyline@0.3.3`, `http-proxy-agent@7.0.2`, and `https-proxy-agent@7.0.6`.
+- **`sharp@0.34.5` added as an optional dependency** to `openclaw`, along with its full platform-specific binary set.
+- **`quickjs-wasi@2.2.0` promoted** from a peer dependency to a direct dependency of `openclaw`.
+- **`brace-expansion` bumped** from `5.0.5` to `5.0.6` in the root `package-lock.json`.
+- **Removed packages**: `uuid`, `extract-zip`, `cli-highlight`, `serialize-error`, `global-agent`, `proxy-agent`, `pac-proxy-agent`, `pac-resolver`, `degenerator`, `ast-types`, `escodegen`, `estraverse`, and several other transitive dependencies removed as part of the proxy and tooling cleanup.
+
+---
+
 ## [1.0.7] - 2026-05-18
 
 ### Added
