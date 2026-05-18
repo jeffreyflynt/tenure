@@ -1,7 +1,7 @@
 {
   "name": "@tenureai/openclaw-plugin",
   "version": "1.0.0",
-  "description": "Persistent local memory for OpenClaw agents. Tenure adapts to your unique communication style, workflow preferences, and project constraints across sessions.",
+  "description": "Persistent local memory for OpenClaw. Tenure stores beliefs as actionable instructions, not just facts, so the model acts on context immediately without inference. Zero-config per-agent isolation, fully local, nothing leaves localhost.",
   "keywords": [
     "openclaw",
     "openclaw-plugin",

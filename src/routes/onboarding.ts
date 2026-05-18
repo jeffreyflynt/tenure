@@ -103,13 +103,15 @@ Do not write anything before or after the JSON. Do not use markdown code blocks.
   "new_beliefs": [
     {
       "type": "preference",
+      "subtype": null,
       "canonical_name": "prefers_direct_answers",
       "content": "wants direct answers without lengthy preamble",
       "why_it_matters": "shapes response length and structure on every future turn",
       "scope": ["user:universal"],
       "confidence": 0.9,
       "epistemic_status": "active",
-      "aliases": ["dislikes_preamble"]
+      "aliases": ["no_preamble", "direct"],
+      "resolves_open_question": null
     }
   ],
   "belief_updates": [],
@@ -123,18 +125,30 @@ Do not write anything before or after the JSON. Do not use markdown code blocks.
 Field rules:
 - turn_signal: always "substantive" for onboarding extraction
 - type: one of "preference", "entity", "decision"
+- subtype: "expertise" for depth calibration beliefs, null for all others
 - canonical_name: snake_case identifier, e.g. "prefers_concise_responses"
 - content: what they said or clearly implied
 - why_it_matters: one sentence on what future responses this shapes; omit the entire belief if this cannot be written
 - scope: array of "kind:value" tags provided in the transcript metadata
-- confidence: float 0.0 to 1.0
-- epistemic_status: one of "active", "inferred" — use "inferred" for conclusions drawn beyond explicit statements
-- aliases: alternative snake_case terms the user used for the same concept, or []
+- epistemic_status:
+  - active: user stated it directly ("I prefer X", "I always do Y")
+  - inferred: derived from framing or behavior, user did not say it directly
+  - exploratory: user is considering it, hedged it, or it is unresolved
+- resolves_open_question: null (reserved for future use in onboarding context)
+- aliases: 1-2 words only, no phrases. Include alternate names, short forms, and counter-signals (names of things explicitly rejected — a query about the rejected thing should surface this belief). Omit generic terms ("code", "tool", "dev"). Use [] if none apply.
+- expertise beliefs only: add expertise_domain (hierarchical slash notation: "javascript/react", "distributed-systems/consensus") at the most specific level the signal supports, and expertise_depth: learning | working | deep | expert
+
+CONFIDENCE:
+- User stated it explicitly and unambiguously → 0.9-1.0
+- User implied it strongly through repeated framing → 0.75-0.89
+- You inferred it from a single signal → 0.5-0.74
+- Weak evidence → omit the belief entirely
 
 Extraction rules:
 - Only capture what was actually said or clearly implied
 - Empty or skipped answers produce no beliefs
-- Never hallucinate entries`;
+- Never hallucinate entries
+- All array fields must be present even when empty — use [], never null or omit`;
 
 interface OnboardingAnswer {
   question_id: string;

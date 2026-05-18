@@ -8,6 +8,7 @@ import type { ProviderRegistry } from "../providers/registry.js";
 import {
   buildImportExtractionPrompt,
   buildImportExtractionSystemPrompt,
+  buildOpenClawExtractionSystemPrompt,
 } from "../extraction/importPrompt.js";
 import { extractJsonBlock } from "../extraction/extractJson.js";
 import type { BeliefWriter } from "../extraction/beliefWriter.js";
@@ -71,6 +72,7 @@ export function registerBeliefsRoutes(
       pinned?: boolean;
       canonical_name?: string;
       why_it_matters?: string;
+      aliases?: string[];
     };
   }>("/v1/beliefs/:id", async (req, reply) => {
     const { id } = req.params;
@@ -97,6 +99,7 @@ export function registerBeliefsRoutes(
       "pinned",
       "canonical_name",
       "why_it_matters",
+      "aliases",
     ] as const;
 
     for (const field of mutable) {
@@ -307,6 +310,18 @@ export function registerBeliefsRoutes(
       }
 
       let extractionRaw: string;
+      const isOpenClaw = (source_label ?? "").startsWith("openclaw:");
+      const agentId = isOpenClaw
+        ? (source_label ?? "").slice("openclaw:".length)
+        : null;
+
+      const systemPrompt =
+        isOpenClaw && agentId
+          ? buildOpenClawExtractionSystemPrompt(agentId)
+          : buildImportExtractionSystemPrompt(
+              scope?.length ? { declaredScope: scope } : {},
+            );
+
       try {
         const resp = await adapter.call(
           {
@@ -323,9 +338,7 @@ export function registerBeliefsRoutes(
             temperature: 0.1,
             max_tokens: 2000,
           },
-          buildImportExtractionSystemPrompt(
-            scope?.length ? { declaredScope: scope } : {},
-          ),
+          systemPrompt,
         );
         extractionRaw = resp.content;
       } catch (err) {

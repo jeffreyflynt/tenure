@@ -278,6 +278,18 @@ function beliefCard(b) {
       </div>
       <div class="bcontent">\${esc(b.content ?? "")}</div>
       \${b.why_it_matters ? \`<div class="bwhy">\${esc(b.why_it_matters)}</div>\` : ""}
+      \${
+        b.aliases?.length
+          ? \`<div style="margin-bottom:.5rem">
+       \${b.aliases
+         .map(
+           (a) =>
+             \`<span class="badge" style="background:var(--surface2);color:var(--muted);margin-right:.25rem">\${esc(a)}</span>\`,
+         )
+         .join("")}
+     </div>\`
+          : ""
+      }
       <div class="bactions">
         <button class="btn btn-pin\${b.pinned ? " active" : ""}" data-action="toggle-pin" data-id="\${esc(b.id)}">\${b.pinned ? "📌 Pinned" : "📌 Pin"}</button>
         <button class="btn" data-action="open-edit" data-id="\${esc(b.id)}">Edit</button>
@@ -359,6 +371,10 @@ function editModal(b) {
       <textarea id="m-content">\${esc(b.content ?? "")}</textarea></div>
     <div class="field"><label>Why it matters</label>
       <input id="m-why" value="\${esc(b.why_it_matters ?? "")}"></div>
+    <div class="field">
+      <label>Aliases <span style="opacity:.5;font-size:.75rem">comma-separated</span></label>
+      <input id="m-aliases" value="\${esc((b.aliases ?? []).join(", "))}">
+    </div>
     <div class="field"><label>Epistemic status</label>
       <select id="m-status">\${["active","inferred","exploratory","superseded"].map(s =>
         \`<option\${b.epistemic_status === s ? " selected" : ""}>\${s}</option>\`).join("")}
@@ -472,6 +488,9 @@ async function saveEdit() {
     why_it_matters:    document.getElementById("m-why")?.value?.trim(),
     epistemic_status:  document.getElementById("m-status")?.value,
     pinned:            document.getElementById("m-pinned")?.checked ?? false,
+    aliases: aliasesRaw
+    ? aliasesRaw.split(",").map(s => s.trim().toLowerCase()).filter(Boolean)
+    : [],
   };
   try {
     const res = await apiFetch("PATCH", \`/v1/beliefs/\${id}\`, patch);

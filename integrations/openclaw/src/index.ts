@@ -40,7 +40,7 @@ async function maybeSeedAgent(
   }
 
   // If BOOTSTRAP.md exists the agent hasn't finished its first-run ritual yet.
-  // USER.md and SOUL.md may still be empty templates — wait for next turn.
+  // USER.md and MEMORY.md may still be empty templates — wait for next turn.
   const bootstrapPath = join(workspaceDir, "BOOTSTRAP.md");
   if (existsSync(bootstrapPath)) return;
 
@@ -51,12 +51,7 @@ async function maybeSeedAgent(
     if (!existsSync(filePath)) continue;
     try {
       const content = readFileSync(filePath, "utf8").trim();
-      if (
-        content.length > 0 &&
-        !content.includes("Fill this in") &&
-        !content.includes("Learn about the person") &&
-        !content.includes("template")
-      ) {
+      if (content.length > 0) {
         chunks.push(`## ${filename}\n\n${content}`);
       }
     } catch {
@@ -65,9 +60,6 @@ async function maybeSeedAgent(
   }
 
   if (chunks.length === 0) {
-    await client
-      .setConfigValue(`seeded_agent:${agentId}`, true)
-      .catch(() => {});
     return;
   }
 
@@ -80,7 +72,6 @@ async function maybeSeedAgent(
     await client.setConfigValue(`seeded_agent:${agentId}`, true);
     logger.info(`[tenure] seeded beliefs for agent: ${agentId}`);
   } catch (err) {
-    // Non-fatal — not marked seeded, will retry next turn
     logger.warn(
       `[tenure] seed failed for agent ${agentId}: ${(err as Error).message}`,
     );
@@ -91,9 +82,9 @@ export default definePluginEntry({
   id: "tenure",
   name: "Tenure",
   description:
-    "Gives OpenClaw persistent memory that learns how you think and work. " +
-    "Tenure remembers your stack decisions, preferences, and what you've ruled out — " +
-    "so every session picks up where you left off without re-explaining yourself.",
+    "Persistent memory for OpenClaw that stores beliefs as actionable instructions, not facts. " +
+    "Zero-config per-agent isolation. Your work, personal, and side-project agents never share context. " +
+    "Fully local proxy, nothing leaves localhost.",
 
   register(api) {
     const logger = api.logger!;

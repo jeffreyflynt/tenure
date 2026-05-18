@@ -1,6 +1,8 @@
 ---
 name: tenure
-description: Persistent local memory for OpenClaw with automatic per-agent isolation. Tenure sits between your agent and your AI provider, learning your decisions, communication style, and working preferences across sessions, with no context bleed between agents. Unlike other memory plugins that require manual userId or agentId scoping, isolation is automatic and zero-config. Runs entirely on localhost. No MEMORY.md required.
+description: >
+  Persistent local memory for OpenClaw. Beliefs stored as actionable instructions,
+  not facts. Zero-config per-agent isolation. Fully local, nothing leaves localhost.
 version: 1.0.0
 user-invocable: true
 metadata:
@@ -199,18 +201,51 @@ On mobile channels, note the localhost URL must be opened on the machine running
 
 Run this flow when the user invokes `!tenure onboarding`. Use `$TENURE_TOKEN` for all API calls.
 
+Let me view the attached files to give you a well-grounded answer before drafting anything.
+
 ### Stage 1 — Provider setup
 
-Ask: "Which provider do you want Tenure to use — Anthropic or OpenAI?" Then ask for their API key.
+Ask: "Which provider do you want Tenure to use — Anthropic or OpenAI?"
+
+**If OpenAI:**
+
+Ask for their API key, then ask: "What type of endpoint are you connecting to?"
+
+Present the three options:
+
+- **Generic OpenAI** — standard OpenAI API or any compatible endpoint
+- **Bedrock Access Gateway** — AWS Bedrock Access Gateway, enables prompt caching
+- **LiteLLM** — LiteLLM proxy, translates caching hints automatically if pointed at Bedrock
+
+For **Generic OpenAI**, ask: "Do you have a custom base URL? (Leave blank for the default OpenAI endpoint.)" — this is optional.
+
+For **Bedrock Access Gateway** and **LiteLLM**, a base URL is required — ask for it and do not proceed without one.
 
 ```bash
-curl -sf -X PUT http://localhost:5757/admin/providers/PROVIDER_ID \
+curl -sf -X PUT http://localhost:5757/admin/providers/openai \
+  -H "Authorization: Bearer $TENURE_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "api_key": "USER_KEY",
+    "endpoint_flavor": "CHOSEN_FLAVOR",
+    "base_url": "USER_BASE_URL"
+  }'
+```
+
+Omit `base_url` from the body if the user left it blank.
+
+**If Anthropic:**
+
+Ask only for their API key. No base URL or endpoint flavor is needed — the Anthropic adapter ignores both.
+
+```bash
+curl -sf -X PUT http://localhost:5757/admin/providers/anthropic \
   -H "Authorization: Bearer $TENURE_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"api_key":"USER_KEY"}'
 ```
 
-`"ok":true` → proceed. `502` → key rejected, ask user to check and retry.
+`"ok":true` → proceed. `502` → credentials rejected by the provider, ask the user to check and retry.
 
 ### Stage 2 — Model selection
 

@@ -1,12 +1,17 @@
 {
   "id": "tenure",
   "name": "Tenure",
-  "description": "Persistent memory for OpenClaw — learns how you think and work across every session",
+  "description": "Persistent local memory for OpenClaw. Tenure stores beliefs as actionable instructions, not just facts, so the model acts on context immediately without inference. Zero-config per-agent isolation, fully local, nothing leaves localhost.",
   "version": "1.0.0",
   "providers": ["tenure"],
   "skills": ["skills/tenure"],
-  "providerAuthEnvVars": {
-    "tenure": ["TENURE_TOKEN"]
+  "setup": {
+    "providers": [
+      {
+        "id": "tenure",
+        "envVars": ["TENURE_TOKEN"]
+      }
+    ]
   },
   "configSchema": {
     "type": "object",

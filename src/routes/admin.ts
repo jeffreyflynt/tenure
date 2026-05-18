@@ -106,7 +106,10 @@ export function registerAdminRoutes(
         "injection_enabled",
       ]);
 
-      if (!safeKeys.has(key)) {
+      const isDynamicKey =
+        key.startsWith("seeded_agent:") || key.startsWith("seed_attempted_at:");
+
+      if (!safeKeys.has(key) && !isDynamicKey) {
         return reply.code(400).send({
           error: {
             message: `Use PUT /admin/providers/:id for credentials. Allowed: ${[...safeKeys].join(", ")}`,
