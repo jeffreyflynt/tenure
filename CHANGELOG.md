@@ -6,6 +6,41 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.0.7] - 2026-05-18
+
+### Added
+
+- **OpenClaw plugin integration (`integrations/openclaw/`)**: New first-class integration package `@tenureai/openclaw-plugin` with a GitHub Actions publish workflow, `openclaw.plugin.json` manifest, `package.json`, TypeScript source, and a full test suite. The plugin registers a Tenure provider in OpenClaw, handles per-agent session isolation via `x-agent-id` headers, seeds beliefs from `USER.md` and `MEMORY.md` on first encounter, and suppresses extraction and injection during agent bootstrapping.
+- **`POST /v1/beliefs` endpoint**: New route for manually creating beliefs from the UI or API, with full validation of type, epistemic status, scope, and canonical name. Returns `409` on canonical name conflict.
+- **`GET /v1/commands` endpoint**: New route returning the full list of Tenure chat commands with their effects and scopes.
+- **`!session` command**: New `matchSessionCommand` and `tryInterceptSessionCommand` helpers allow the OpenClaw plugin to bind a session key and agent ID on each turn, with full test coverage.
+- **`buildOpenClawExtractionSystemPrompt`**: Dedicated extraction system prompt for OpenClaw workspace file ingestion, with agent-scoped scope assignment rules and template-filtering guidance.
+- **`New Belief` button in beliefs UI**: Inline creation modal with fields for type, canonical name, content, why it matters, scope, and aliases.
+- **Aliases displayed in belief cards**: Alias badges now render below belief content in the UI.
+- **Aliases editable in the edit modal**: The edit modal now includes a comma-separated aliases field.
+- **`x-tenure-bootstrapping` header support**: Extraction and injection are suppressed when the OpenClaw agent is mid-bootstrap.
+- **`docker-compose.yml` user field**: `user: "${UID:-1000}:${GID:-1000}"` added to the `tenure` service.
+
+### Changed
+
+- **`chown` moved after `init` exit in `entrypoint.sh`**: The `chown -R tenure:tenure` call now runs only on the normal startup path, not during `init`, avoiding a permission error when the mount is owned by the host user.
+- **Agent scope pinning**: When `x-agent-id` is present on a request, the session scope is set directly from the agent identity rather than going through first-turn auto-detection.
+- **`listPinnedFacts` query tightened**: The `$or: [{ user_edited: true }, { scope: { $in: scope } }]` branch has been removed; pinned facts now require scope match. `user_edited` beliefs no longer surface cross-scope.
+- **`BeliefMerger` passes scope to `findByAliasOrCanonical`**: Deduplication during extraction is now scope-aware, preventing cross-scope canonical name collisions from blocking new beliefs.
+- **`BeliefWriter.findByCanonicalName` and `findByAliasOrCanonical` accept optional `scope` filter**.
+- **Sidecar prompt revised**: Scope assignment rules condensed to three priority rules, `user:universal` narrowed to direct communication-style statements, example beliefs updated, and the `epistemic_status` and `topic_label` instructions moved inline before the closing `SIDECAR_END`.
+- **Import and onboarding extraction prompts updated**: `resolves_open_question`, expanded `TYPES` list, `CONFIDENCE` block with explicit thresholds, and revised `ALIASES` guidance added to both `buildImportExtractionSystemPrompt` and the onboarding extraction prompt.
+- **`retrieval.cases.json` fixture updated**: `user-edited-cross-scope-surfaces` test case now asserts the belief is excluded (`mustExclude`) rather than included, reflecting the scope isolation fix. `maxBeliefs` budget case corrected from `3` to `2`.
+- **`seeded_agent:` and `seed_attempted_at:` keys allowlisted** in `PUT /admin/config/:key` without requiring an explicit entry in the safe key set.
+- **`SKILL.md` replaced**: The monolithic `integrations/openclaw/SKILL.md` has been removed and replaced with `integrations/openclaw/skills/tenure/SKILL.md`, rewritten with updated install steps (token now read from `~/.tenure/token`), a revised onboarding flow using the probe-models and validate-model endpoints, and expanded agent notes.
+- **`BeliefsDeps` now requires `beliefWriter`**: Wired through from `server.ts` using a new `BeliefWriter` instance.
+
+### Fixed
+
+- **`saveEdit` in beliefs UI**: `aliasesRaw` variable was referenced before being declared; the assignment has been hoisted.
+
+---
+
 ## [1.0.6] - 2026-05-15
 
 ### Changed

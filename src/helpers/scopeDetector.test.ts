@@ -12,6 +12,8 @@ import {
   tryInterceptInjectCommand,
   matchExtractCommand,
   tryInterceptExtractCommand,
+  matchSessionCommand,
+  tryInterceptSessionCommand,
 } from "./scopeDetector.js";
 
 test("matchScopeCommand returns null for a regular message", (t) => {
@@ -1116,4 +1118,127 @@ test("!extract global off does not match inject command parser", (t) => {
 
 test("!inject global off does not match extract command parser", (t) => {
   t.is(matchExtractCommand("!inject global off"), null);
+});
+
+test("matchSessionCommand returns null for a regular message", (t) => {
+  t.is(matchSessionCommand("what is Redis?"), null);
+});
+
+test("matchSessionCommand returns null for empty string", (t) => {
+  t.is(matchSessionCommand(""), null);
+});
+
+test("matchSessionCommand returns null for bare !session", (t) => {
+  t.is(matchSessionCommand("!session"), null);
+});
+
+test("matchSessionCommand returns null for !session with only one argument", (t) => {
+  t.is(matchSessionCommand("!session agent:work:abc123"), null);
+});
+
+test("matchSessionCommand returns null when prefix appears mid-message", (t) => {
+  t.is(
+    matchSessionCommand("please !session agent:work:abc123 work for me"),
+    null,
+  );
+});
+
+test("matchSessionCommand parses sessionKey and agentId", (t) => {
+  const result = matchSessionCommand("!session agent:work:abc123 work");
+  t.deepEqual(result, { sessionKey: "agent:work:abc123", agentId: "work" });
+});
+
+test("matchSessionCommand parses main agent", (t) => {
+  const result = matchSessionCommand("!session agent:main:xyz main");
+  t.deepEqual(result, { sessionKey: "agent:main:xyz", agentId: "main" });
+});
+
+test("matchSessionCommand is case-insensitive on the prefix", (t) => {
+  const result = matchSessionCommand("!SESSION agent:work:abc123 work");
+  t.deepEqual(result, { sessionKey: "agent:work:abc123", agentId: "work" });
+});
+
+test("matchSessionCommand handles complex session keys", (t) => {
+  const result = matchSessionCommand(
+    "!session agent:coding:derived_a1b2c3d4e5f6 coding",
+  );
+  t.deepEqual(result, {
+    sessionKey: "agent:coding:derived_a1b2c3d4e5f6",
+    agentId: "coding",
+  });
+});
+
+function makeSessionCommandDeps(getOrCreateFn?: sinon.SinonStub) {
+  return {
+    sessions: {
+      getOrCreate: getOrCreateFn ?? sinon.stub().resolves({ activeScope: [] }),
+    },
+  };
+}
+
+test("tryInterceptSessionCommand returns null for non-command message", async (t) => {
+  const result = await tryInterceptSessionCommand(
+    "what is Redis?",
+    "user-1",
+    makeSessionCommandDeps(),
+    NOOP_LOGGER,
+  );
+  t.is(result, null);
+});
+
+test("tryInterceptSessionCommand returns null for bare !session", async (t) => {
+  const result = await tryInterceptSessionCommand(
+    "!session",
+    "user-1",
+    makeSessionCommandDeps(),
+    NOOP_LOGGER,
+  );
+  t.is(result, null);
+});
+
+test("tryInterceptSessionCommand returns sessionId and agentId on valid command", async (t) => {
+  const result = await tryInterceptSessionCommand(
+    "!session agent:work:abc123 work",
+    "user-1",
+    makeSessionCommandDeps(),
+    NOOP_LOGGER,
+  );
+  t.truthy(result);
+  t.is(result!.sessionId, "agent:work:abc123");
+  t.is(result!.agentId, "work");
+});
+
+test("tryInterceptSessionCommand calls getOrCreate with the extracted sessionKey", async (t) => {
+  const getOrCreate = sinon.stub().resolves({ activeScope: [] });
+  await tryInterceptSessionCommand(
+    "!session agent:work:abc123 work",
+    "user-1",
+    makeSessionCommandDeps(getOrCreate),
+    NOOP_LOGGER,
+  );
+  t.true(getOrCreate.calledOnceWith("agent:work:abc123", "user-1"));
+});
+
+test("tryInterceptSessionCommand still returns result when getOrCreate fails", async (t) => {
+  const getOrCreate = sinon.stub().rejects(new Error("mongo down"));
+  const result = await tryInterceptSessionCommand(
+    "!session agent:work:abc123 work",
+    "user-1",
+    makeSessionCommandDeps(getOrCreate),
+    NOOP_LOGGER,
+  );
+  t.truthy(result);
+  t.is(result!.sessionId, "agent:work:abc123");
+  t.is(result!.agentId, "work");
+});
+
+test("tryInterceptSessionCommand does not call getOrCreate for non-command", async (t) => {
+  const getOrCreate = sinon.stub().resolves({});
+  await tryInterceptSessionCommand(
+    "normal message",
+    "user-1",
+    makeSessionCommandDeps(getOrCreate),
+    NOOP_LOGGER,
+  );
+  t.false(getOrCreate.called);
 });

@@ -29,6 +29,8 @@ import path, { dirname } from "node:path";
 import fastifyStatic from "@fastify/static";
 import { registerBackupRoutes, type BackupDeps } from "./routes/backup.js";
 import { registerPersonaRoutes, type PersonaDeps } from "./routes/persona.js";
+import { registerCommandsRoute } from "./routes/commands.js";
+import { BeliefWriter } from "./extraction/beliefWriter.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -168,6 +170,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     extractionWorker: deps.extractionWorker,
     runtimeStore: deps.runtimeStore,
     providers: deps.providers,
+    beliefWriter: new BeliefWriter(deps.cols.beliefs),
   };
   registerBeliefsRoutes(app, beliefsDeps);
 
@@ -198,6 +201,8 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   };
 
   registerPersonaRoutes(app, personaDeps);
+
+  registerCommandsRoute(app);
 
   await app.register(fastifySchedule);
 

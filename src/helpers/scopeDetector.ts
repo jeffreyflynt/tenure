@@ -19,6 +19,12 @@ export interface ExtractInterceptResult {
   message: string;
 }
 
+export interface SessionInterceptResult {
+  message: string;
+  sessionId: string;
+  agentId: string;
+}
+
 export type CommandAction = "off" | "on" | "global-off" | "global-on";
 
 const SCOPE_PATTERN =
@@ -93,6 +99,8 @@ export function expandScopeHierarchy(scopes: string[]): string[] {
   return [...expanded];
 }
 
+// If you add or change commands here, update TENURE_COMMANDS in routes/commands.ts
+// to keep GET /v1/commands accurate.
 export function matchScopeCommand(content: string): string | null {
   const trimmed = content.trim();
   const lower = trimmed.toLowerCase();
@@ -437,4 +445,42 @@ export async function tryInterceptInjectCommand(
       }
       return { message: "Belief injection re-enabled globally." };
   }
+}
+
+export function matchSessionCommand(
+  content: string,
+): { sessionKey: string; agentId: string } | null {
+  const trimmed = content.trim();
+  const match = trimmed.match(/^!session\s+(\S+)\s+(\S+)$/i);
+  if (!match) return null;
+  return { sessionKey: match[1], agentId: match[2] };
+}
+
+export async function tryInterceptSessionCommand(
+  content: string,
+  userId: string,
+  deps: {
+    sessions: {
+      getOrCreate: (id: string, userId: string) => Promise<unknown>;
+    };
+  },
+  logger: FastifyBaseLogger,
+): Promise<SessionInterceptResult | null> {
+  const matched = matchSessionCommand(content);
+  if (!matched) return null;
+
+  try {
+    await deps.sessions.getOrCreate(matched.sessionKey, userId);
+  } catch (err) {
+    logger.warn(
+      { err, sessionKey: matched.sessionKey },
+      "session command: getOrCreate failed",
+    );
+  }
+
+  return {
+    message: `__session_established__`,
+    sessionId: matched.sessionKey,
+    agentId: matched.agentId,
+  };
 }

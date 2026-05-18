@@ -19,6 +19,7 @@ import { SIDECAR_BEGIN, SIDECAR_END } from "../sidecar/splitter.js";
 import { ExtractionWorker } from "../extraction/worker.js";
 import { RuntimeConfigStore } from "../config/runtime.ts";
 import { ErrorLogger } from "../errors/logger.ts";
+import { Session } from "../types/session.ts";
 
 const test = anyTest.serial as TestFn;
 
@@ -1896,7 +1897,9 @@ test("!extract global off calls runtimeStore.set with extraction_enabled false",
   });
   await app.ready();
 
-  await db.collection("sessions").deleteMany({ _id: "sess-global-extract" });
+  await db
+    .collection<Session>("sessions")
+    .deleteMany({ _id: "sess-global-extract" });
   const sessions = new SessionManager(db);
   await sessions.getOrCreate("sess-global-extract", USER_ID);
   await sessions.update("sess-global-extract", USER_ID, {

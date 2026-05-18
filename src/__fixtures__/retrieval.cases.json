@@ -314,14 +314,13 @@
   },
   {
     "caseId": "user-edited-cross-scope-surfaces",
-    "description": "user_edited belief scoped to domain:writing surfaces in domain:code via listPinnedFacts $or branch",
+    "description": "user_edited belief scoped to domain:writing does NOT surface in domain:code — scope isolation takes precedence over user_edited flag",
     "scope": ["domain:code"],
     "query": "summarize what you know about my preferences",
     "expect": {
-      "pinnedFacts": { "mustInclude": ["b-prose-style-user-edited"] },
+      "pinnedFacts": { "mustExclude": ["b-prose-style-user-edited"] },
       "relevantBeliefs": { "shouldOnlyInclude": [] }
-    },
-    "notes": ""
+    }
   },
   {
     "caseId": "user-edited-absent-without-flag",
@@ -641,7 +640,7 @@
     "description": "maxBeliefs set to exact pinned count — no slots remain for relevantBeliefs",
     "scope": ["domain:code"],
     "query": "How should I handle errors in my repository layer?",
-    "budget": { "maxBeliefs": 3 },
+    "budget": { "maxBeliefs": 2 },
     "expect": {
       "pinnedFacts": { "mustInclude": [] },
       "relevantBeliefs": { "shouldOnlyInclude": [] }

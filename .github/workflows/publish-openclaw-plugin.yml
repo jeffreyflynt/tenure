@@ -1,0 +1,68 @@
+name: Publish OpenClaw Plugin
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry run (no publish)"
+        type: boolean
+        default: false
+
+jobs:
+  publish:
+    name: Build and publish @tenureai/openclaw-plugin
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: integrations/openclaw
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "25"
+          cache: npm
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Verify dist exists
+        run: |
+          test -f dist/index.js || (echo "dist/index.js missing" && exit 1)
+          test -f dist/index.d.ts || (echo "dist/index.d.ts missing" && exit 1)
+
+      - name: Verify openclaw.plugin.json
+        run: |
+          test -f openclaw.plugin.json || (echo "openclaw.plugin.json missing" && exit 1)
+          node -e "JSON.parse(require('fs').readFileSync('openclaw.plugin.json','utf8'))" \
+            || (echo "openclaw.plugin.json is not valid JSON" && exit 1)
+
+      - name: Verify SKILL.md ships in package
+        run: |
+          test -f skills/tenure/SKILL.md || (echo "skills/tenure/SKILL.md missing" && exit 1)
+
+      - name: Sync version from release tag
+        if: github.event_name == 'release'
+        run: |
+          TAG="${{ github.event.release.tag_name }}"
+          VERSION="${TAG#v}"
+          npm version "$VERSION" --no-git-tag-version
+
+      - name: Publish to npm
+        if: ${{ !inputs.dry_run }}
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Dry run publish
+        if: ${{ inputs.dry_run }}
+        run: npm publish --dry-run --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

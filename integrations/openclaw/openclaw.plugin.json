@@ -1,0 +1,50 @@
+{
+  "id": "tenure",
+  "name": "Tenure",
+  "description": "Persistent local memory for OpenClaw. Tenure stores beliefs as actionable instructions, not just facts, so the model acts on context immediately without inference. Zero-config per-agent isolation, fully local, nothing leaves localhost.",
+  "version": "1.0.0",
+  "providers": ["tenure"],
+  "skills": ["skills/tenure"],
+  "setup": {
+    "providers": [
+      {
+        "id": "tenure",
+        "envVars": ["TENURE_TOKEN"]
+      }
+    ]
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "baseUrl": {
+        "type": "string",
+        "description": "Tenure proxy base URL (default: http://localhost:5757)"
+      },
+      "token": {
+        "type": "string",
+        "description": "Tenure bearer token (auto-read from ~/.tenure/token if not set)"
+      },
+      "port": {
+        "type": "number",
+        "description": "Tenure port override (default: 5757)"
+      }
+    }
+  },
+  "uiHints": {
+    "token": {
+      "label": "Tenure Token",
+      "help": "Read from ~/.tenure/token automatically after install",
+      "placeholder": "mp_...",
+      "sensitive": true
+    },
+    "baseUrl": {
+      "label": "Tenure Base URL",
+      "placeholder": "http://localhost:5757"
+    },
+    "port": {
+      "label": "Tenure Port",
+      "advanced": true
+    }
+  }
+}

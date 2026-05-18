@@ -8,8 +8,10 @@ import type { ProviderRegistry } from "../providers/registry.js";
 import {
   buildImportExtractionPrompt,
   buildImportExtractionSystemPrompt,
+  buildOpenClawExtractionSystemPrompt,
 } from "../extraction/importPrompt.js";
 import { extractJsonBlock } from "../extraction/extractJson.js";
+import type { BeliefWriter } from "../extraction/beliefWriter.js";
 
 export interface BeliefsDeps {
   beliefs: Collection<Belief>;
@@ -18,6 +20,7 @@ export interface BeliefsDeps {
   extractionWorker: ExtractionWorkerLike;
   runtimeStore: RuntimeConfigStore;
   providers: ProviderRegistry;
+  beliefWriter: BeliefWriter;
 }
 
 export function registerBeliefsRoutes(
@@ -69,6 +72,7 @@ export function registerBeliefsRoutes(
       pinned?: boolean;
       canonical_name?: string;
       why_it_matters?: string;
+      aliases?: string[];
     };
   }>("/v1/beliefs/:id", async (req, reply) => {
     const { id } = req.params;
@@ -95,6 +99,7 @@ export function registerBeliefsRoutes(
       "pinned",
       "canonical_name",
       "why_it_matters",
+      "aliases",
     ] as const;
 
     for (const field of mutable) {
@@ -166,6 +171,109 @@ export function registerBeliefsRoutes(
     },
   );
 
+  app.post<{
+    Body: {
+      type: string;
+      canonical_name: string;
+      content: string;
+      why_it_matters: string;
+      scope: string[];
+      confidence?: number;
+      epistemic_status?: string;
+      aliases?: string[];
+    };
+  }>("/v1/beliefs", async (req, reply) => {
+    const body = req.body ?? {};
+
+    if (!body.type || !body.canonical_name?.trim() || !body.content?.trim()) {
+      return reply.code(400).send({
+        error: { message: "type, canonical_name, and content are required" },
+      });
+    }
+    if (!body.why_it_matters?.trim()) {
+      return reply.code(400).send({
+        error: { message: "why_it_matters is required" },
+      });
+    }
+    if (!Array.isArray(body.scope) || body.scope.length === 0) {
+      return reply.code(400).send({
+        error: { message: "scope is required and must be a non-empty array" },
+      });
+    }
+
+    const VALID_TYPES = new Set([
+      "preference",
+      "decision",
+      "entity",
+      "relation",
+      "open_question",
+    ]);
+    if (!VALID_TYPES.has(body.type)) {
+      return reply.code(400).send({
+        error: {
+          message: `invalid type: ${body.type}. Must be one of: ${[...VALID_TYPES].join(", ")}`,
+        },
+      });
+    }
+
+    const VALID_STATUSES = new Set(["active", "inferred", "exploratory"]);
+    const epistemicStatus = body.epistemic_status ?? "active";
+    const confidence = body.confidence ?? 1.0;
+    if (!VALID_STATUSES.has(epistemicStatus)) {
+      return reply.code(400).send({
+        error: {
+          message: `invalid epistemic_status: ${epistemicStatus}`,
+        },
+      });
+    }
+
+    try {
+      const beliefId = await deps.beliefWriter.create({
+        user_id: userId,
+        type: body.type as any,
+        subtype: null,
+        canonical_name: body.canonical_name.trim(),
+        aliases: Array.isArray(body.aliases) ? body.aliases : [],
+        content: body.content.trim(),
+        why_it_matters: body.why_it_matters.trim(),
+        scope: body.scope,
+        provenance: {
+          session_id: "manual",
+          turn_id: "manual",
+          extracted_at: new Date(),
+          source_model: "user",
+        },
+        epistemic_status: epistemicStatus as any,
+        confidence,
+        pinned: false,
+        user_edited: true,
+        change_log: [
+          {
+            changed_at: new Date(),
+            trigger: "manual_creation",
+            changed_by_session: null,
+            changed_by_turn: null,
+          },
+        ],
+      });
+
+      const created = await col.findOne({ _id: beliefId, user_id: userId });
+      return reply
+        .code(201)
+        .send({ belief: created ? redactForClient(created) : null });
+    } catch (e: any) {
+      if (e.constructor?.name === "CanonicalNameConflictError") {
+        return reply.code(409).send({
+          error: {
+            message: `A belief with canonical name "${body.canonical_name.trim()}" already exists`,
+            type: "conflict",
+          },
+        });
+      }
+      throw e;
+    }
+  });
+
   app.post<{ Body: { text: string; source_label?: string; scope?: string[] } }>(
     "/v1/beliefs/ingest",
     async (req, reply) => {
@@ -202,6 +310,18 @@ export function registerBeliefsRoutes(
       }
 
       let extractionRaw: string;
+      const isOpenClaw = (source_label ?? "").startsWith("openclaw:");
+      const agentId = isOpenClaw
+        ? (source_label ?? "").slice("openclaw:".length)
+        : null;
+
+      const systemPrompt =
+        isOpenClaw && agentId
+          ? buildOpenClawExtractionSystemPrompt(agentId)
+          : buildImportExtractionSystemPrompt(
+              scope?.length ? { declaredScope: scope } : {},
+            );
+
       try {
         const resp = await adapter.call(
           {
@@ -218,9 +338,7 @@ export function registerBeliefsRoutes(
             temperature: 0.1,
             max_tokens: 2000,
           },
-          buildImportExtractionSystemPrompt(
-            scope?.length ? { declaredScope: scope } : {},
-          ),
+          systemPrompt,
         );
         extractionRaw = resp.content;
       } catch (err) {

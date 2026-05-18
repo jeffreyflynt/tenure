@@ -39,6 +39,8 @@ import {
   type ScopeDetectorDeps,
   tryInterceptExtractCommand,
   tryInterceptInjectCommand,
+  expandScopeHierarchy,
+  tryInterceptSessionCommand,
 } from "../helpers/scopeDetector.js";
 import type { ErrorLogger } from "../errors/logger.js";
 import { parseClient, type ParsedClient } from "../helpers/clientDetector.js";
@@ -178,6 +180,10 @@ export function registerChatRoute(app: FastifyInstance, deps: ChatDeps): void {
       sessionId = randomUUID();
     }
 
+    let ocAgentId =
+      (req.headers["x-agent-id"] as string | undefined)?.trim().toLowerCase() ||
+      undefined;
+
     let session: (Session & { providerId: string; model: string }) | null =
       null;
     try {
@@ -224,8 +230,47 @@ export function registerChatRoute(app: FastifyInstance, deps: ChatDeps): void {
 
     const client = parseClient(req.headers["user-agent"] as string | undefined);
 
+    const rawContentText =
+      typeof rawContent === "string" ? rawContent : extractText(rawContent);
+
+    const sessionIntercepted = await tryInterceptSessionCommand(
+      rawContentText,
+      userId,
+      deps,
+      req.log,
+    );
+
+    if (sessionIntercepted) {
+      sessionId = sessionIntercepted.sessionId;
+      ocAgentId = sessionIntercepted.agentId;
+      try {
+        const raw = await deps.sessions.getOrCreate(sessionId, userId);
+        const needsBind =
+          !raw.providerId || !raw.model || raw.model !== requestedModel;
+        if (needsBind) {
+          const updated = await deps.sessions.update(sessionId, userId, {
+            providerId: adapter.id,
+            model: requestedModel,
+          });
+          if (updated?.providerId && updated?.model) {
+            session = updated as Session & {
+              providerId: string;
+              model: string;
+            };
+          }
+        } else {
+          session = raw as Session & { providerId: string; model: string };
+        }
+      } catch (err) {
+        req.log.warn(
+          { err, sessionId },
+          "session reload after !session failed",
+        );
+      }
+    }
+
     const intercepted = await tryInterceptScopeCommand(
-      typeof rawContent === "string" ? rawContent : extractText(rawContent),
+      rawContentText,
       sessionId,
       userId,
       deps,
@@ -262,7 +307,7 @@ export function registerChatRoute(app: FastifyInstance, deps: ChatDeps): void {
     }
 
     const extractIntercepted = await tryInterceptExtractCommand(
-      typeof rawContent === "string" ? rawContent : extractText(rawContent),
+      rawContentText,
       sessionId,
       userId,
       { sessions: deps.sessions, runtimeStore: deps.runtimeStore },
@@ -299,7 +344,7 @@ export function registerChatRoute(app: FastifyInstance, deps: ChatDeps): void {
     }
 
     const injectIntercepted = await tryInterceptInjectCommand(
-      typeof rawContent === "string" ? rawContent : extractText(rawContent),
+      rawContentText,
       sessionId,
       userId,
       { sessions: deps.sessions, runtimeStore: deps.runtimeStore },
@@ -332,40 +377,60 @@ export function registerChatRoute(app: FastifyInstance, deps: ChatDeps): void {
       });
     }
 
-    const isFirstTurn =
-      (session?.turnCounter ?? 0) === 0 &&
-      scope.length === 0 &&
-      deps.scopeDetector != null &&
-      cfg.scope_auto_detect !== false;
+    // If the OpenClaw plugin sent an agent identity, trust it on every turn.
+    // Persist it so the session stays consistent if a non-OpenClaw turn arrives later.
+    const agentRootScope =
+      ocAgentId && ocAgentId !== "main"
+        ? expandScopeHierarchy([`domain:${ocAgentId}`])
+        : null;
 
-    if (isFirstTurn && deps.scopeDetector) {
-      try {
-        const existingScopes = await fetchExistingUserScopes(
-          userId,
-          deps.scopeDetector.db,
+    if (agentRootScope) {
+      scope = agentRootScope;
+      await deps.sessions
+        .update(sessionId, userId, { activeScope: agentRootScope })
+        .catch((err) =>
+          req.log.warn({ err, sessionId }, "agent scope pin failed"),
         );
-        const detected = await detectScopeFromMessage(
-          latestUserMessage,
-          existingScopes,
-          deps.scopeDetector,
-          req.log,
-        );
-        if (detected.length > 0) {
-          await deps.sessions
-            .update(sessionId, userId, { activeScope: detected })
-            .catch((err) =>
-              req.log.warn(
-                { err, sessionId },
-                "first-turn scope persist failed",
-              ),
-            );
-          scope = detected;
+    } else {
+      // No agent identity — fall back to detection on turn zero only.
+      // Subsequent turns use whatever was last persisted on the session.
+      const isFirstTurn =
+        (session?.turnCounter ?? 0) === 0 &&
+        scope.length === 0 &&
+        deps.scopeDetector != null &&
+        cfg.scope_auto_detect !== false;
+
+      if (isFirstTurn && deps.scopeDetector) {
+        try {
+          const existingScopes = await fetchExistingUserScopes(
+            userId,
+            deps.scopeDetector.db,
+          );
+
+          const detected = await detectScopeFromMessage(
+            latestUserMessage,
+            existingScopes,
+            deps.scopeDetector,
+            req.log,
+          );
+
+          if (detected.length > 0) {
+            await deps.sessions
+              .update(sessionId, userId, { activeScope: detected })
+              .catch((err) =>
+                req.log.warn(
+                  { err, sessionId },
+                  "first-turn scope persist failed",
+                ),
+              );
+            scope = detected;
+          }
+        } catch (err) {
+          req.log.warn(
+            { err, sessionId },
+            "first-turn scope detection failed — proceeding without scope",
+          );
         }
-      } catch (err) {
-        req.log.warn(
-          { err, sessionId },
-          "first-turn scope detection failed — proceeding without scope",
-        );
       }
     }
 
@@ -373,16 +438,25 @@ export function registerChatRoute(app: FastifyInstance, deps: ChatDeps): void {
       req.headers["x-tenure-no-extract"] === "true" ||
       req.headers["x-tenure-no-extract"] === "1";
 
+    // When an OpenClaw agent is bootstrapping, BOOTSTRAP.md exists in the
+    // workspace. The plugin sets this header to suppress extraction and
+    // injection until the ritual completes and the file is removed.
+    const bootstrapInProgress =
+      req.headers["x-tenure-bootstrapping"] === "1" ||
+      req.headers["x-tenure-bootstrapping"] === "true";
+
     const extractionEnabled =
       cfg.extraction_enabled !== false &&
       session?.extractionPaused !== true &&
       !client.isIde &&
-      !noExtractHeader;
+      !noExtractHeader &&
+      !bootstrapInProgress;
 
     const injectionEnabled =
       cfg.injection_enabled !== false &&
       session?.injectionPaused !== true &&
-      !client.isIde;
+      !client.isIde &&
+      !bootstrapInProgress;
 
     const [beliefCtx] = await Promise.all([
       injectionEnabled

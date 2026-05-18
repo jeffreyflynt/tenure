@@ -200,6 +200,8 @@ export class BeliefMerger {
     const matches = await this.writer.findByAliasOrCanonical(
       userId,
       nb.canonical_name,
+      true,
+      nb.scope,
     );
     const existing =
       matches.find(
@@ -236,6 +238,7 @@ export class BeliefMerger {
             userId,
             nb.canonical_name,
             true,
+            nb.scope,
           );
           if (!conflictMatch) {
             return {

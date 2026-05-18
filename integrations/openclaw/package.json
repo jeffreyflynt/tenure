@@ -1,0 +1,75 @@
+{
+  "name": "@tenureai/openclaw-plugin",
+  "version": "1.0.0",
+  "description": "Persistent local memory for OpenClaw. Tenure stores beliefs as actionable instructions, not just facts, so the model acts on context immediately without inference. Zero-config per-agent isolation, fully local, nothing leaves localhost.",
+  "keywords": [
+    "openclaw",
+    "openclaw-plugin",
+    "ai-agent",
+    "persistent-memory",
+    "long-term-memory",
+    "context-retention",
+    "user-preferences",
+    "communication-style",
+    "workflow-tool",
+    "research-assistant",
+    "writing-assistant",
+    "local-ai",
+    "cognitive-proxy"
+  ],
+  "type": "module",
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "files": [
+    "dist",
+    "skills",
+    "openclaw.plugin.json",
+    "README.md"
+  ],
+  "openclaw": {
+    "extensions": [
+      "./src/index.ts"
+    ],
+    "providers": [
+      "tenure"
+    ],
+    "compat": {
+      "pluginApi": ">=2026.3.24",
+      "minGatewayVersion": "2026.3.24"
+    },
+    "build": {
+      "openclawVersion": "2026.3.24",
+      "pluginSdkVersion": "2026.3.24"
+    }
+  },
+  "scripts": {
+    "build": "tsgo",
+    "dev": "tsc --watch",
+    "prepublishOnly": "npm run build",
+    "test": "ava",
+    "test:watch": "ava --watch"
+  },
+  "peerDependencies": {
+    "openclaw": ">=2026.3.24"
+  },
+  "devDependencies": {
+    "openclaw": "latest",
+    "typescript": "^5.4.0",
+    "ava": "^6.0.0",
+    "@types/node": "^22.0.0"
+  },
+  "ava": {
+    "files": [
+      "src/**/*.test.ts"
+    ],
+    "extensions": {
+      "ts": "module"
+    },
+    "nodeArguments": [
+      "--import=tsx/esm"
+    ],
+    "timeout": "30s",
+    "workerThreads": false
+  }
+}

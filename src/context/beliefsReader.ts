@@ -62,10 +62,7 @@ export class BeliefsReader {
     }
 
     return this.col
-      .find({
-        ...base,
-        $or: [{ user_edited: true }, { scope: { $in: scope } }],
-      })
+      .find({ ...base, scope: { $in: scope } })
       .sort({ user_edited: -1, last_reinforced_at: -1 })
       .limit(limit)
       .toArray();

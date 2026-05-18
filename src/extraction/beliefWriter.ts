@@ -178,12 +178,14 @@ export class BeliefWriter {
     userId: string,
     canonicalName: string,
     activeOnly = true,
+    scope?: string[],
   ): Promise<Belief | null> {
     const query: Record<string, unknown> = {
       user_id: userId,
       canonical_name: canonicalName.trim().toLowerCase(),
     };
     if (activeOnly) query.superseded_by = null;
+    if (scope?.length) query.scope = { $in: scope };
     return await this.col.findOne(query);
   }
 
@@ -191,6 +193,7 @@ export class BeliefWriter {
     userId: string,
     surface: string,
     activeOnly = true,
+    scope?: string[],
   ): Promise<Belief[]> {
     const normalized = surface.trim().toLowerCase();
     const query: Record<string, unknown> = {
@@ -198,6 +201,7 @@ export class BeliefWriter {
       $or: [{ canonical_name: normalized }, { aliases: normalized }],
     };
     if (activeOnly) query.superseded_by = null;
+    if (scope?.length) query.scope = { $in: scope };
     return await this.col.find(query).toArray();
   }
 

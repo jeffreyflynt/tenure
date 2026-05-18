@@ -3,10 +3,7 @@ set -e
 
 TENURE_HOME="${TENURE_HOME:-/app/.tenure}"
 
-chown -R tenure:tenure "$TENURE_HOME"
-
 if [ "$1" = "init" ]; then
-
   mkdir -p "$TENURE_HOME/config"
 
   if [ ! -f "$TENURE_HOME/docker-compose.yml" ]; then
@@ -29,4 +26,5 @@ if [ "$1" = "init" ]; then
   exit 0
 fi
 
+chown -R tenure:tenure "$TENURE_HOME"
 exec gosu tenure "$@"
