@@ -282,7 +282,23 @@ curl -sf http://localhost:5757/v1/onboarding/questions \
   -H "Authorization: Bearer $TENURE_TOKEN"
 ```
 
-Group by `category`. Ask each category as a natural conversation, not a form. Accumulate answers by `id`. Skipped categories are fine.
+Read the full response and build a category map before asking anything. The response contains 11 questions across 5 categories in this order:
+
+1. `communication_style` — 2 questions
+2. `expertise_calibration` — 2 questions
+3. `working_style` — 3 questions
+4. `output_preferences` — 2 questions
+5. `project_seed` — 2 questions
+
+Maintain a running answers array throughout — one entry per question, shaped as `{ question_id, question, answer }`. You will send this entire array to Stage 4 in one call, so hold every answer in memory until then.
+
+Work through categories sequentially. Within each category ask questions one at a time as a natural conversation — not a form, not a numbered list. Signal transitions between categories naturally (e.g. "Next I want to ask about how you like to work..."). Do not announce category names or question counts.
+
+Rules for the conversation:
+
+- If the user skips or gives a blank answer, record an empty string for that `question_id` and move on — do not stall or re-ask
+- Do not re-read the skill or pause mid-flow to check anything — drive the conversation to completion in one pass
+- After the last question in `project_seed`, move immediately to Stage 4 — do not loop back or ask if they want to continue
 
 ### Stage 4 — Commit
 
