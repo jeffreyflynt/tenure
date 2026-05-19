@@ -92,7 +92,6 @@ jobs:
             --source-commit $(git rev-parse HEAD) \
             --version ${{ steps.version.outputs.value }} \
             --owner @tenureai \
-            --name tenure \
             --family code-plugin \
             --source-path integrations/openclaw
         env:
@@ -107,7 +106,6 @@ jobs:
             --source-commit $(git rev-parse HEAD) \
             --version ${{ steps.version.outputs.value }} \
             --owner @tenureai \
-            --name tenure \
             --family code-plugin \
             --source-path integrations/openclaw \
             --dry-run

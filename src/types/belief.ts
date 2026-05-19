@@ -35,6 +35,7 @@ export interface ChangeLogEntry {
 export interface Belief {
   _id: string;
   user_id: string;
+  agent_id: string | null;
   type: BeliefType;
   subtype: BeliefSubtype;
   canonical_name: string;

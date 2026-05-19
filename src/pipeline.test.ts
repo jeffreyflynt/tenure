@@ -103,6 +103,7 @@ async function seedBeliefs(): Promise<void> {
     {
       _id: BELIEF_ID.stackPreference,
       user_id: USER_ID,
+      agent_id: null,
       type: "preference",
       canonical_name: "project-stack",
       aliases: ["stack", "language"],
@@ -126,6 +127,7 @@ async function seedBeliefs(): Promise<void> {
     {
       _id: BELIEF_ID.compositionPreference,
       user_id: USER_ID,
+      agent_id: null,
       type: "preference",
       canonical_name: "composition-over-inheritance",
       aliases: [],
@@ -150,6 +152,7 @@ async function seedBeliefs(): Promise<void> {
     {
       _id: BELIEF_ID.databaseQuestion,
       user_id: USER_ID,
+      agent_id: null,
       type: "open_question",
       canonical_name: "database-choice",
       aliases: ["db"],
@@ -173,6 +176,7 @@ async function seedBeliefs(): Promise<void> {
     {
       _id: BELIEF_ID.commitmentFastify,
       user_id: USER_ID,
+      agent_id: null,
       type: "decision",
       canonical_name: "web-framework",
       aliases: ["framework"],
@@ -980,6 +984,7 @@ test("compaction: completed_topic does not collapse a turn with an inactive beli
   await db.collection<Belief>("beliefs").insertOne({
     _id: inactiveBeliefId,
     user_id: USER_ID,
+    agent_id: null,
     type: "entity",
     canonical_name: "old-framework",
     content: "Was using Express",
@@ -1042,6 +1047,7 @@ test("long session: topic drift, always-on injection, world model updates, compa
   await db.collection<Belief>("beliefs").insertOne({
     _id: ALWAYS_ON_BELIEF_ID,
     user_id: USER_ID,
+    agent_id: null,
     type: "preference",
     canonical_name: "response-style",
     aliases: ["verbosity"],

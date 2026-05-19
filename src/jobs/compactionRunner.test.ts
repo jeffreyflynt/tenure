@@ -4,7 +4,10 @@ import { MongoClient, type Collection, type Db } from "mongodb";
 import sinon from "sinon";
 import { BeliefCompactionRunner } from "./compactionRunner.js";
 import type { Belief } from "../types/belief.js";
-import type { CompactionLogEntry } from "./compactionRunner.js";
+import type {
+  BeliefContradiction,
+  CompactionLogEntry,
+} from "./compactionRunner.js";
 import type { ProviderAdapter } from "../providers/types.js";
 import type { PersonaCache } from "../context/personaCache.js";
 
@@ -15,6 +18,7 @@ let client: MongoClient;
 let db: Db;
 let beliefs: Collection<Belief>;
 let compactionLog: Collection<CompactionLogEntry>;
+let contradictions: Collection<BeliefContradiction>;
 
 test.before(async () => {
   mongod = await MongoMemoryServer.create();
@@ -23,6 +27,7 @@ test.before(async () => {
   db = client.db("test");
   beliefs = db.collection<Belief>("beliefs");
   compactionLog = db.collection<CompactionLogEntry>("compaction_log");
+  contradictions = db.collection<BeliefContradiction>("contradictions");
 });
 
 test.after.always(async () => {
@@ -33,6 +38,7 @@ test.after.always(async () => {
 test.beforeEach(async () => {
   await beliefs.deleteMany({});
   await compactionLog.deleteMany({});
+  await contradictions.deleteMany({});
 });
 
 let beliefCounter = 0;
@@ -43,6 +49,7 @@ function makeBelief(overrides: Partial<Belief> = {}): Belief {
   return {
     _id: id,
     user_id: "user-1",
+    agent_id: null,
     type: "preference",
     subtype: null,
     canonical_name: `belief_${id}`,
@@ -127,6 +134,7 @@ function makeRunner(
   return new BeliefCompactionRunner(
     beliefs,
     compactionLog,
+    contradictions,
     () => adapter,
     "test-model",
     personaCache ?? makePersonaCache(),

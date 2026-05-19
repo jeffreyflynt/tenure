@@ -5,7 +5,10 @@ import type { Session } from "../types/session.js";
 import type { ExtractionJob } from "../types/job.js";
 import type { ErrorLog } from "../types/error.js";
 import type { PersonaDoc } from "../context/personaCache.js";
-import type { CompactionLogEntry } from "../jobs/compactionRunner.js";
+import type {
+  CompactionLogEntry,
+  BeliefContradiction,
+} from "../jobs/compactionRunner.js";
 
 export interface ConfigDoc {
   _id: string;
@@ -34,6 +37,7 @@ export interface Collections {
   topic_index: Collection<TopicIndexEntry>;
   persona_cache: Collection<PersonaDoc>;
   compaction_log: Collection<CompactionLogEntry>;
+  contradictions: Collection<BeliefContradiction>;
 }
 
 export function getCollections(db: Db): Collections {
@@ -48,5 +52,6 @@ export function getCollections(db: Db): Collections {
     topic_index: db.collection<TopicIndexEntry>("topic_index"),
     persona_cache: db.collection<PersonaDoc>("persona_cache"),
     compaction_log: db.collection<CompactionLogEntry>("compaction_log"),
+    contradictions: db.collection<BeliefContradiction>("belief_contradictions"),
   };
 }

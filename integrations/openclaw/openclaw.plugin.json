@@ -2,7 +2,7 @@
   "id": "tenure",
   "name": "Tenure",
   "description": "Persistent local memory for OpenClaw. Tenure stores beliefs as actionable instructions, not just facts, so the model acts on context immediately without inference. Zero-config per-agent isolation, fully local, nothing leaves localhost.",
-  "version": "1.0.0",
+  "version": "1.0.13",
   "providers": ["tenure"],
   "skills": ["skills/tenure"],
   "setup": {

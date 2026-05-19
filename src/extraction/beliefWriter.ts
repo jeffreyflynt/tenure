@@ -22,6 +22,7 @@ export class CanonicalNameConflictError extends Error {
 
 export interface CreateBeliefInput {
   user_id: string;
+  agent_id?: string | null;
   type: BeliefType;
   subtype: BeliefSubtype;
   canonical_name: string;
@@ -55,6 +56,7 @@ export class BeliefWriter {
     const doc: Belief = {
       _id: id,
       user_id: input.user_id,
+      agent_id: input.agent_id ?? null,
       type: input.type,
       subtype: input.subtype,
       canonical_name: input.canonical_name.trim().toLowerCase(),
@@ -101,6 +103,40 @@ export class BeliefWriter {
 
   async get(userId: string, beliefId: string): Promise<Belief | null> {
     return await this.col.findOne({ _id: beliefId, user_id: userId });
+  }
+
+  async enrichContent(
+    userId: string,
+    beliefId: string,
+    appendedContent: string,
+    sessionId: string,
+    turnId: string,
+  ): Promise<boolean> {
+    const now = new Date();
+    const belief = await this.col.findOne({ _id: beliefId, user_id: userId });
+    if (!belief) return false;
+
+    const newContent = `${belief.content}; ${appendedContent}`;
+
+    const res = await this.col.updateOne(
+      { _id: beliefId, user_id: userId },
+      {
+        $set: {
+          content: newContent,
+          updated_at: now,
+        },
+        $push: {
+          change_log: {
+            changed_at: now,
+            trigger: `enriched: "${appendedContent}"`,
+            previous_content: belief.content,
+            changed_by_session: sessionId,
+            changed_by_turn: turnId,
+          },
+        },
+      },
+    );
+    return res.modifiedCount === 1;
   }
 
   async reinforce(

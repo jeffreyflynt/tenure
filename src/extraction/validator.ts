@@ -9,6 +9,7 @@ const VALID_TURN_SIGNALS = new Set([
   "clarification",
   "correction",
 ]);
+
 const VALID_BELIEF_TYPES = new Set([
   "entity",
   "relation",
@@ -16,10 +17,12 @@ const VALID_BELIEF_TYPES = new Set([
   "open_question",
   "decision",
 ]);
+
 const VALID_CHANGE_KINDS = new Set([
   "reinforced",
   "contradicted",
   "superseded",
+  "enriched",
 ]);
 
 export interface ParseResult {

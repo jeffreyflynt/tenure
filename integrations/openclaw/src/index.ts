@@ -12,19 +12,6 @@ interface PluginConfig {
 
 const SEED_FILES = ["USER.md", "MEMORY.md"] as const;
 
-// Session key → agentId, populated at session lifecycle time.
-// Bounded to prevent unbounded growth in long-running processes.
-const MAX_MAP_SIZE = 500;
-const sessionAgentMap = new Map<string, string>();
-
-function setSessionAgent(sessionKey: string, agentId: string): void {
-  if (sessionAgentMap.size >= MAX_MAP_SIZE) {
-    const firstKey = sessionAgentMap.keys().next().value;
-    if (firstKey) sessionAgentMap.delete(firstKey);
-  }
-  sessionAgentMap.set(sessionKey, agentId);
-}
-
 async function maybeSeedAgent(
   agentId: string,
   workspaceDir: string,
@@ -105,42 +92,22 @@ export default definePluginEntry({
     const client = createTenureClient({ baseUrl, token });
     const registry = new ModelRegistry(client);
 
-    // Populate sessionAgentMap as early as possible in the session lifecycle.
-    // session_start fires at session boundary — use it if agentId is available.
-    // before_tool_call is the confirmed fallback where agentId is first-class typed.
-    // Both write to the same map so whichever fires first wins, and subsequent
-    // calls are no-ops since we only write on first encounter.
     api.on(
       "session_start",
       async (_event, ctx) => {
         const agentId =
           ((ctx as Record<string, unknown>)["agentId"] as string | undefined) ??
           "main";
-        const sessionKey =
-          ((ctx as Record<string, unknown>)["sessionKey"] as
-            | string
-            | undefined) ??
-          ((ctx as Record<string, unknown>)["sessionId"] as string | undefined);
-        if (sessionKey && !sessionAgentMap.has(sessionKey)) {
-          setSessionAgent(sessionKey, agentId);
-        }
-      },
-      { priority: 0 },
-    );
+        if (agentId === "main") return;
 
-    api.on(
-      "before_tool_call",
-      async (_event, ctx) => {
-        const agentId =
-          ((ctx as Record<string, unknown>)["agentId"] as string | undefined) ??
-          "main";
-        const sessionKey =
-          ((ctx as Record<string, unknown>)["sessionKey"] as
-            | string
-            | undefined) ??
-          ((ctx as Record<string, unknown>)["sessionId"] as string | undefined);
-        if (sessionKey && !sessionAgentMap.has(sessionKey)) {
-          setSessionAgent(sessionKey, agentId);
+        try {
+          const workspaceDir = api.runtime.agent.resolveAgentWorkspaceDir(
+            api.config,
+            agentId,
+          );
+          maybeSeedAgent(agentId, workspaceDir, client, logger).catch(() => {});
+        } catch {
+          // workspace resolution failed — seeding will retry on next turn
         }
       },
       { priority: 0 },
@@ -152,7 +119,9 @@ export default definePluginEntry({
       auth: [],
 
       resolveTransportTurnState: (ctx) => {
-        const agentId = sessionAgentMap.get(ctx.sessionId ?? "") ?? "main";
+        const agentId =
+          ((ctx as Record<string, unknown>)["agentId"] as string | undefined) ??
+          "main";
 
         if (agentId !== "main") {
           try {

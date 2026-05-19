@@ -1,10 +1,17 @@
-export type ChangeKind = "reinforced" | "contradicted" | "superseded";
+export type ChangeKind =
+  | "reinforced"
+  | "contradicted"
+  | "superseded"
+  | "enriched";
+
 export type TurnSignal =
   | "substantive"
   | "acknowledgment"
   | "clarification"
   | "correction";
+
 export type StyleConfidence = "low" | "medium" | "high";
+
 export type BeliefTypeStr =
   | "entity"
   | "relation"

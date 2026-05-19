@@ -164,15 +164,20 @@ See [docs/prompt-caching.md](docs/prompt-caching.md) for details.
 
 Belief extraction requires reliable structured output. Smaller or heavily quantized models won't produce the consistency the extraction worker needs.
 
-| Family          | Floor                          | Status    |
-| --------------- | ------------------------------ | --------- |
-| Claude          | 4.5 and above                  | Community |
-| GPT             | GPT-4o-mini and above          | Community |
-| OpenAI o-series | o3, o4-mini and above          | Community |
-| Bedrock Claude  | Anthropic Claude 4.5 and above | Verified  |
-| Bedrock Nova    | Amazon Nova Pro                | Community |
+| Family          | Floor                                               | Status    |
+| --------------- | --------------------------------------------------- | --------- |
+| Claude          | 4.5 and above                                       | Community |
+| GPT             | GPT-4o-mini, GPT-4.1-mini, and above                | Community |
+| OpenAI o-series | o3, o4-mini and above                               | Community |
+| Bedrock Claude  | Anthropic Claude 4.5 and above                      | Verified  |
+| Bedrock Nova    | Nova Pro, Nova 2, Nova Premier (Nova Lite excluded) | Community |
+| Bedrock GPT-OSS | GPT-OSS 120B only (20B excluded)                    | Community |
+| Bedrock Mistral | Mistral Large 3 (675B) only                         | Community |
+| Qwen3           | Qwen3-235B-A22B-2507 and above                      | Community |
 
 Any OpenAI-compatible endpoint serving one of these models works, including Bedrock gateways, LiteLLM, and similar setups.
+
+A note on floors: exclusions are deliberate. GPT-OSS 20B, Nova Lite, Ministral, and smaller Qwen3 variants pass format checks but produce insufficient extraction quality for Tenure's sidecar schema. When in doubt, use a verified or larger community model.
 
 ## Tradeoffs and The Ramp
 

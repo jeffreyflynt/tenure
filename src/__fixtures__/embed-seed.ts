@@ -24,7 +24,7 @@ import {
 const INPUT = resolve("src/__fixtures__/beliefs.seed.json");
 const OUTPUT = resolve("src/__fixtures__/beliefs.seed.embedded.json");
 
-const CONCURRENCY = 1; // Ollama handles 4 concurrent embed calls comfortably
+const CONCURRENCY = 1;
 
 async function chunk<T>(
   items: T[],

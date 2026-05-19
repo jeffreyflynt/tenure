@@ -175,6 +175,7 @@ export class BackupImporter {
             providerId: s.providerId,
             model: s.model,
             activeScope: s.activeScope,
+            agentId: s.agentId ?? null,
             turnCounter: s.turnCounter ?? 0,
             createdAt: new Date(s.createdAt),
             lastUsedAt: new Date(s.lastUsedAt),

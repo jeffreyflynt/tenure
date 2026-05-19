@@ -213,6 +213,7 @@ export class ExtractionWorker implements ExtractionWorkerLike {
       sessionId: job.session_id,
       turnId: job.turn_id ?? "",
       sourceModel: job.payload?.source_model ?? "unknown",
+      agentId: (job as any).agent_id ?? null,
       result,
     });
 

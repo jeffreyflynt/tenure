@@ -39,7 +39,6 @@ import {
   type ScopeDetectorDeps,
   tryInterceptExtractCommand,
   tryInterceptInjectCommand,
-  expandScopeHierarchy,
   tryInterceptSessionCommand,
 } from "../helpers/scopeDetector.js";
 import type { ErrorLogger } from "../errors/logger.js";
@@ -56,6 +55,18 @@ export interface ChatDeps {
   runtimeStore: RuntimeConfigStore;
   scopeDetector?: ScopeDetectorDeps;
   errorLogger: ErrorLogger;
+}
+
+interface ResolveScopeArgs {
+  ocAgentId: string | undefined;
+  sessionScope: string[];
+  session: (Session & { providerId: string; model: string }) | null;
+  sessionId: string;
+  userId: string;
+  latestUserMessage: string;
+  cfg: { scope_auto_detect?: boolean };
+  deps: ChatDeps;
+  logger: FastifyBaseLogger;
 }
 
 interface ChatBody {
@@ -76,7 +87,6 @@ interface ChatBody {
 interface SidecarFlags {
   hasNewBeliefs: boolean;
   hasOpenQuestion: boolean;
-  topicLabel: string | null;
 }
 
 const EMPTY_CONTEXT: BuiltContext = {
@@ -94,22 +104,19 @@ const EMPTY_CONTEXT: BuiltContext = {
 
 function readSidecarFlags(sidecarRaw: string | null): SidecarFlags {
   if (!sidecarRaw) {
-    return { hasNewBeliefs: false, hasOpenQuestion: false, topicLabel: null };
+    return { hasNewBeliefs: false, hasOpenQuestion: false };
   }
   const parsed = parseSidecar(sidecarRaw);
   if (!parsed) {
-    return { hasNewBeliefs: false, hasOpenQuestion: false, topicLabel: null };
+    return { hasNewBeliefs: false, hasOpenQuestion: false };
   }
-  const hasNewBeliefs =
-    Array.isArray(parsed.new_beliefs) && parsed.new_beliefs.length > 0;
-  const hasOpenQuestion =
-    Array.isArray(parsed.new_open_questions) &&
-    parsed.new_open_questions.length > 0;
-  const topicLabel =
-    typeof parsed.topic_label === "string" && parsed.topic_label.trim()
-      ? parsed.topic_label.trim().toLowerCase()
-      : null;
-  return { hasNewBeliefs, hasOpenQuestion, topicLabel };
+  return {
+    hasNewBeliefs:
+      Array.isArray(parsed.new_beliefs) && parsed.new_beliefs.length > 0,
+    hasOpenQuestion:
+      Array.isArray(parsed.new_open_questions) &&
+      parsed.new_open_questions.length > 0,
+  };
 }
 
 export function registerChatRoute(app: FastifyInstance, deps: ChatDeps): void {
@@ -377,62 +384,21 @@ export function registerChatRoute(app: FastifyInstance, deps: ChatDeps): void {
       });
     }
 
-    // If the OpenClaw plugin sent an agent identity, trust it on every turn.
-    // Persist it so the session stays consistent if a non-OpenClaw turn arrives later.
-    const agentRootScope =
-      ocAgentId && ocAgentId !== "main"
-        ? expandScopeHierarchy([`domain:${ocAgentId}`])
-        : null;
-
-    if (agentRootScope) {
-      scope = agentRootScope;
-      await deps.sessions
-        .update(sessionId, userId, { activeScope: agentRootScope })
-        .catch((err) =>
-          req.log.warn({ err, sessionId }, "agent scope pin failed"),
-        );
-    } else {
-      // No agent identity — fall back to detection on turn zero only.
-      // Subsequent turns use whatever was last persisted on the session.
-      const isFirstTurn =
-        (session?.turnCounter ?? 0) === 0 &&
-        scope.length === 0 &&
-        deps.scopeDetector != null &&
-        cfg.scope_auto_detect !== false;
-
-      if (isFirstTurn && deps.scopeDetector) {
-        try {
-          const existingScopes = await fetchExistingUserScopes(
-            userId,
-            deps.scopeDetector.db,
-          );
-
-          const detected = await detectScopeFromMessage(
-            latestUserMessage,
-            existingScopes,
-            deps.scopeDetector,
-            req.log,
-          );
-
-          if (detected.length > 0) {
-            await deps.sessions
-              .update(sessionId, userId, { activeScope: detected })
-              .catch((err) =>
-                req.log.warn(
-                  { err, sessionId },
-                  "first-turn scope persist failed",
-                ),
-              );
-            scope = detected;
-          }
-        } catch (err) {
-          req.log.warn(
-            { err, sessionId },
-            "first-turn scope detection failed — proceeding without scope",
-          );
-        }
-      }
-    }
+    // Resolve scope per-turn. Agent identity (from OpenClaw or any client that
+    // sends x-agent-id) is authoritative and wins unconditionally. For clients
+    // without agent identity, fall back to session-persisted scope, then to
+    // first-turn auto-detection.
+    scope = await resolveScope({
+      ocAgentId,
+      sessionScope: scope,
+      session,
+      sessionId,
+      userId,
+      latestUserMessage,
+      cfg,
+      deps,
+      logger: req.log,
+    });
 
     const noExtractHeader =
       req.headers["x-tenure-no-extract"] === "true" ||
@@ -458,12 +424,16 @@ export function registerChatRoute(app: FastifyInstance, deps: ChatDeps): void {
       !client.isIde &&
       !bootstrapInProgress;
 
+    const agentId = ocAgentId && ocAgentId !== "main" ? ocAgentId : null;
+
     const [beliefCtx] = await Promise.all([
       injectionEnabled
-        ? deps.context.build(userId, scope, latestUserMessage).catch((err) => {
-            req.log.warn({ err }, "context assembly failed");
-            return EMPTY_CONTEXT;
-          })
+        ? deps.context
+            .build(userId, scope, latestUserMessage, agentId)
+            .catch((err) => {
+              req.log.warn({ err }, "context assembly failed");
+              return EMPTY_CONTEXT;
+            })
         : Promise.resolve(EMPTY_CONTEXT),
     ]);
 
@@ -537,6 +507,7 @@ export function registerChatRoute(app: FastifyInstance, deps: ChatDeps): void {
           extractionEnabled,
           injectionEnabled,
           client,
+          agentId,
         },
       );
     }
@@ -643,6 +614,7 @@ export function registerChatRoute(app: FastifyInstance, deps: ChatDeps): void {
         logger: req.log,
         extractionEnabled,
         client,
+        agentId,
       });
     } catch (err) {
       req.log.error(
@@ -670,6 +642,7 @@ interface StreamingCtx {
   extractionEnabled: boolean;
   injectionEnabled: boolean;
   client: ParsedClient;
+  agentId: string | null;
 }
 
 async function handleStreamingResponse(
@@ -875,6 +848,7 @@ async function handleStreamingResponse(
     logger: ctx.logger,
     extractionEnabled: ctx.extractionEnabled,
     client: ctx.client,
+    agentId: ctx.agentId,
   });
 }
 
@@ -892,6 +866,7 @@ function ts(): number {
 interface SideEffectInput {
   deps: ChatDeps;
   userId: string;
+  agentId: string | null;
   sessionId: string;
   turnId: string;
   latestUserMessage: string;
@@ -925,7 +900,7 @@ async function runSideEffects(input: SideEffectInput): Promise<void> {
       turnSignal: input.turnSignal,
       hasOpenQuestion: flags.hasOpenQuestion,
       hasNewBeliefs: flags.hasNewBeliefs,
-      topics: flags.topicLabel ? [flags.topicLabel] : [],
+      topics: [],
       scope: input.scope,
     });
   } catch (err) {
@@ -949,6 +924,7 @@ async function runSideEffects(input: SideEffectInput): Promise<void> {
         scope: input.scope,
         sourceModel: `${input.adapter.id}:${input.model}`,
         clientCategory: input.client.category,
+        agentId: input.agentId,
       });
       input.deps.extractionWorker
         .processById(jobId)
@@ -1084,6 +1060,76 @@ function buildSystemPrompt(args: BuildSystemPromptArgs): SystemPromptParts {
     beliefs: beliefsSection,
     dynamic: dynamicParts.join("\n\n"),
   };
+}
+
+async function resolveScope(args: ResolveScopeArgs): Promise<string[]> {
+  const {
+    ocAgentId,
+    sessionScope,
+    session,
+    sessionId,
+    userId,
+    latestUserMessage,
+    cfg,
+    deps,
+    logger,
+  } = args;
+
+  if (ocAgentId && ocAgentId !== "main") {
+    const currentAgentId = (session as any)?.agentId;
+    if (currentAgentId !== ocAgentId) {
+      await deps.sessions
+        .update(sessionId, userId, { agentId: ocAgentId })
+        .catch((err) =>
+          logger.warn({ err, sessionId }, "agent id persist failed"),
+        );
+    }
+  }
+
+  // 2. Session already has a persisted scope (set by a prior turn or agent).
+  if (sessionScope.length > 0) {
+    return sessionScope;
+  }
+
+  // 3. First-turn auto-detection for non-agent clients.
+  const isFirstTurn =
+    (session?.turnCounter ?? 0) === 0 &&
+    deps.scopeDetector != null &&
+    cfg.scope_auto_detect !== false;
+
+  if (!isFirstTurn || !deps.scopeDetector) {
+    return sessionScope;
+  }
+
+  try {
+    const existingScopes = await fetchExistingUserScopes(
+      userId,
+      deps.scopeDetector.db,
+    );
+
+    const detected = await detectScopeFromMessage(
+      latestUserMessage,
+      existingScopes,
+      deps.scopeDetector,
+      logger,
+    );
+
+    if (detected.length > 0) {
+      await deps.sessions
+        .update(sessionId, userId, { activeScope: detected })
+        .catch((err) =>
+          logger.warn({ err, sessionId }, "first-turn scope persist failed"),
+        );
+      return detected;
+    }
+  } catch (err) {
+    logger.warn(
+      { err, sessionId },
+      "first-turn scope detection failed — proceeding without scope",
+    );
+  }
+
+  return sessionScope;
 }
 
 function tryReadTurnSignal(sidecarRaw: string | null): TurnSignal {

@@ -6,6 +6,56 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.0.13] - 2026-05-19
+
+### Added
+
+- **Agent isolation (`agent_id`) across the belief system**: Beliefs, sessions, extraction jobs, contradictions, and compaction now track an `agent_id` field, enabling per-agent belief partitioning. All readers, writers, and queries filter by agent identity so that beliefs belonging to one agent do not leak into another's context.
+- **`belief_contradictions` collection and detection pipeline**: The compaction runner now detects contradicting beliefs within a scope and persists them as `BeliefContradiction` documents with `pending`/`resolved` status. Dedicated indexes (`contradictions_agent_scope_status`, `contradictions_pending_recent`) support efficient querying.
+- **`enriched` change kind for belief updates**: A new `"enriched"` signal allows the sidecar to append minor attributes to an existing entity without replacing its content. The merger calls the new `BeliefWriter.enrichContent` method, and the validator accepts `"enriched"` as a valid change kind.
+- **`enrichContent` method on `BeliefWriter`**: Appends content to an existing belief, records the change in `change_log`, and returns success status.
+- **`findByCanonicalNames` method on `BeliefsReader`**: Batch lookup of beliefs by canonical name with scope and agent filtering.
+- **Sidecar prompt: belief enrichment guidance**: Explicit rules and examples for when to emit an `"enriched"` signal versus creating a new belief or superseding.
+- **Expanded model support in `tiers.ts`**: Added detection and floor definitions for Bedrock GPT-OSS 120B, Bedrock Mistral Large 3 (675B), and Qwen3-235B-A22B-2507. GPT-4.1-mini and GPT-4.1-nano version extraction added.
+- **`status` field on `SupportedFamilySummary`**: Each supported family now reports whether it is `"verified"` or `"community"`.
+- **Repository metadata in OpenClaw plugin `package.json`**: Added `repository` field pointing to the GitHub repo with directory context.
+- **`resolveScope` helper in chat route**: Extracted scope resolution logic into a dedicated async function with clear priority: agent identity wins unconditionally, then session-persisted scope, then first-turn auto-detection.
+
+### Changed
+
+- **OpenClaw plugin version bumped to `1.0.13`**: Both `openclaw.plugin.json` and `package.json` updated from `1.0.0` to `1.0.13`.
+- **OpenClaw plugin session-agent map removed**: The in-memory `sessionAgentMap` with its bounded LRU eviction has been removed. Agent identity is now resolved directly from the context object on `session_start` and `resolveTransportTurnState`, eliminating the `before_tool_call` listener entirely.
+- **OpenClaw plugin seeding moved to `session_start`**: `maybeSeedAgent` is now called eagerly during `session_start` for non-main agents instead of being deferred.
+- **`--name tenure` removed from publish workflow**: The `--name` flag has been dropped from both the live and dry-run `openclaw plugin publish` commands.
+- **Compaction runner refactored for agent-aware partitions**: `findQualifyingScopes` renamed to `findQualifyingPartitions`, grouping by both `scope` and `agent_id`. The `compact` method builds agent-isolation filters and handles `$or` collisions between type and agent filters.
+- **Compaction LLM prompts updated**: Both `DEDUP_COMPACTION_PROMPT` and `PREFERENCE_COMPACTION_PROMPT` now instruct the model to detect and return contradictions alongside merges. `max_tokens` raised from 2000 to 20000.
+- **`BeliefsReader` methods accept `agentId` parameter**: `listAlwaysOn`, `listPinnedFacts`, `listByScope`, `searchText`, `listPinnedOpenQuestions`, and `countActive` all support optional agent filtering via a new `mergeFilter` helper that safely combines `$or` clauses.
+- **`ContextBuilder.build` accepts `agentId`**: Agent identity is threaded through to all belief reader calls and Atlas Search filters.
+- **Atlas Search index updated to version 2**: `agent_id` added as a `token` field in the beliefs search index mapping. Agent isolation in text search uses a compound `should` clause with `minimumShouldMatch: 1`.
+- **`BeliefMerger.merge` accepts `agentId`**: Passed through to `processSignal`, `insertNewBelief`, and `insertOpenQuestion` so all created beliefs inherit the correct agent.
+- **Extraction job queue includes `agent_id`**: `EnqueueParams` accepts `agentId`, written to the job document for downstream use by the worker.
+- **Session model includes `agentId` field**: `Session`, `SessionPatch`, and backup export/import types now carry `agentId`.
+- **Belief type includes `agent_id` field**: The core `Belief` interface now requires `agent_id: string | null`.
+- **`ExtractionJob` type includes `agent_id`**: Optional `agent_id` field added to the job interface.
+- **Chat route passes `agentId` to context build, side effects, and streaming context**: The resolved agent ID flows end-to-end through injection, extraction enqueue, and streaming.
+- **`readSidecarFlags` simplified**: `topicLabel` removed from `SidecarFlags`; topics array in side effects defaults to empty.
+- **README model table expanded**: Added GPT-4.1-mini, Bedrock Nova 2/Premier (Nova Lite excluded), Bedrock GPT-OSS 120B (20B excluded), Bedrock Mistral Large 3, and Qwen3-235B-A22B-2507. Added a "floors" explanatory note.
+- **Onboarding extraction `max_tokens` raised**: Bumped from 2000 to 4000.
+- **Sidecar prompt example revised**: Replaced `prefers_direct_answers` example with an `expertise` subtype example (`javascript_react_expertise`). Removed `topic_shift` and `topic_label` fields from the example output.
+- **`extractGptVersion` extended**: Now recognizes `gpt-4.1`, `gpt-4.1-mini`, and `gpt-4.1-nano` model IDs with appropriate version numbers.
+- **`openai-o-series` regex broadened**: Detection pattern changed from `/^o[3-9]/i` to `/^o[3-9]\d*/i` to match multi-digit o-series models.
+- **`bedrock-nova-pro` detection broadened**: Now matches `nova-pro`, `nova-premier`, and `nova-2` patterns.
+- **Expertise synthesis now inherits `agent_id`**: New expertise beliefs copy agent identity from the existing expertise belief or the first source belief.
+
+### Removed
+
+- **`topic_label` from sidecar output schema**: The field is no longer extracted or used for topic tracking.
+- **`topic_shift` from sidecar output schema**: Removed alongside `topic_label`.
+- **`expandScopeHierarchy` import from chat route**: No longer used after scope resolution refactor.
+- **In-memory `sessionAgentMap` from OpenClaw plugin**: Replaced by direct context reads.
+
+---
+
 ## [1.0.12] - 2026-05-18
 
 ### Changed
