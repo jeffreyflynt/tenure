@@ -19,7 +19,7 @@ const SEARCH_INDEXES: SearchIndexMeta[] = [
   {
     name: "beliefs_search",
     collectionName: "beliefs",
-    version: 1,
+    version: 2,
     definition: {
       analyzer: "lucene.standard",
       analyzers: [
@@ -104,6 +104,7 @@ const SEARCH_INDEXES: SearchIndexMeta[] = [
         fields: {
           _id: { type: "token" },
           user_id: { type: "token" },
+          agent_id: { type: "token" },
           canonical_name: {
             type: "string",
             analyzer: "whole_name_analyzer",
@@ -225,6 +226,17 @@ export async function ensureIndexes(cols: Collections): Promise<void> {
     { user_id: 1, scope: 1, ran_at: -1 },
     { name: "compaction_log_cooldown" },
   );
+
+  await cols.contradictions.createIndexes([
+    {
+      key: { user_id: 1, agent_id: 1, scope: 1, status: 1 },
+      name: "contradictions_agent_scope_status",
+    },
+    {
+      key: { user_id: 1, status: 1, detected_at: -1 },
+      name: "contradictions_pending_recent",
+    },
+  ]);
 }
 
 export async function ensureSearchIndexes(db: Db): Promise<void> {

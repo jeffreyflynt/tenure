@@ -83,6 +83,18 @@ Aliases must be specific enough that their presence in a query is meaningful evi
 
 ENTITY UPDATES: when the user refers to an existing belief using a surface form not in its aliases, emit an entity_update.
 
+BELIEF ENRICHMENT: when the user adds a minor attribute to an existing entity
+visible in <relevant_beliefs> or <pinned_facts> (color, count, small detail
+that only matters in context of the parent entity), emit a belief_update with
+change: "enriched" and new_content set to ONLY the appended detail — not the
+full content.
+
+Test: would someone query for this detail independently of the parent entity?
+  - "The Buick is red" → No. Emit enriched on the buick entity.
+  - "John speaks with a stutter" → Yes. Emit as a new belief (john_speech_style).
+  - "The API now has 3 replicas" → No. Enrich the api_service entity.
+  - "We switched from REST to GraphQL" → Supersede. This replaces, not extends.
+
 CONFIDENCE:
 - User stated it explicitly and unambiguously → 0.9-1.0
 - User implied it strongly through repeated behavior or framing → 0.75-0.89
@@ -95,7 +107,6 @@ TURN SIGNAL:
 - clarification: asked for or provided clarification without new commitment
 - correction: user corrected the assistant or a prior belief
 
-topic_label: 2-4 lowercase noun-phrase words. Reuse the exact label when continuing a prior topic.
 
 epistemic_status - pick by how the belief entered the conversation:
 - active: user stated it directly ("I prefer X", "we use Y", "I decided Z")
@@ -114,8 +125,6 @@ All array fields must be present even when empty, use [], never null or omit.
 ${SIDECAR_BEGIN}
 {
   "turn_signal": "substantive",
-  "topic_shift": false,
-  "topic_label": "stripe webhook integration",
   "new_beliefs": [
     {
       "type": "preference",
@@ -131,14 +140,16 @@ ${SIDECAR_BEGIN}
     },
     {
       "type": "preference",
-      "subtype": null,
-      "canonical_name": "prefers_direct_answers",
-      "content": "Wants the answer first, reasoning after if needed — no preamble",
-      "why_it_matters": "Skip wind-up and qualifications; lead with the response",
+      "subtype": "expertise",
+      "canonical_name": "javascript_react_expertise",
+      "content": "Works with React at a deep level — sets component architecture conventions",
+      "why_it_matters": "Skip React basics; engage on trade-offs, patterns, and performance",
       "scope": ["user:universal"],
-      "confidence": 0.9,
-      "epistemic_status": "active",
-      "aliases": ["no_preamble", "direct"],
+      "confidence": 0.8,
+      "epistemic_status": "inferred",
+      "aliases": ["react", "react_depth"],
+      "expertise_domain": "javascript/react",
+      "expertise_depth": "deep",
       "resolves_open_question": null
     }
   ],

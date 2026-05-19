@@ -4,6 +4,7 @@ import type { ExtractionJob, ParseStatus } from "../types/job.js";
 
 export interface EnqueueParams {
   userId: string;
+  agentId?: string | null;
   sessionId: string;
   turnId: string;
   userMessage: string;
@@ -45,6 +46,7 @@ export class ExtractionJobQueue {
       user_id: params.userId,
       session_id: params.sessionId,
       turn_id: params.turnId,
+      agent_id: params.agentId ?? null,
       status: "pending",
       attempts: 0,
       max_attempts: 3,

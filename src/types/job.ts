@@ -20,6 +20,7 @@ export interface ExtractionJob {
   _id: string;
   type: JobType;
   user_id: string;
+  agent_id?: string | null;
   session_id: string;
   turn_id: string;
   status: JobStatus;

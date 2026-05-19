@@ -79,6 +79,7 @@ export class BackupExporter {
         providerId: (s.providerId as string) ?? null,
         model: (s.model as string) ?? null,
         activeScope: (s.activeScope as string[]) ?? [],
+        agentId: (s.agentId as string) ?? null,
         turnCounter: (s.turnCounter as number) ?? 0,
         createdAt:
           (s.createdAt as Date)?.toISOString() ?? new Date().toISOString(),

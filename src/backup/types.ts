@@ -85,6 +85,7 @@ export interface ExportedSession {
   providerId: string | null;
   model: string | null;
   activeScope: string[];
+  agentId?: string | null;
   turnCounter: number;
   createdAt: string;
   lastUsedAt: string;

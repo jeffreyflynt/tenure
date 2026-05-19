@@ -33,7 +33,7 @@ async function verifyEncryptionActive(
   mongoDbName: string,
 ): Promise<void> {
   const testCol = db.collection("beliefs");
-  const testId = randomBytes(8).toString("hex"); // string id, not ObjectId
+  const testId = randomBytes(8).toString("hex");
   const testContent = `encryption-verify-${randomBytes(8).toString("hex")}`;
 
   try {
@@ -159,6 +159,7 @@ export async function buildApp(config: BootstrapConfig) {
   const compactionRunner = new BeliefCompactionRunner(
     cols.beliefs,
     cols.compaction_log,
+    cols.contradictions,
     resolveAdapter,
     runtimeConfig.default_model,
     persona,

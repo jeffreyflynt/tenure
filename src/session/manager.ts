@@ -14,6 +14,7 @@ export interface Session {
   lastUsedAt: Date;
   extractionPaused?: boolean;
   injectionPaused?: boolean;
+  agentId: string | null;
 }
 
 export interface SessionPatch {
@@ -21,6 +22,7 @@ export interface SessionPatch {
   providerId?: string;
   model?: string;
   activeScope?: string[];
+  agentId?: string;
   extractionPaused?: boolean;
   injectionPaused?: boolean;
 }
@@ -48,6 +50,7 @@ export class SessionManager {
           providerId: null,
           model: null,
           activeScope: [],
+          agentId: null,
           turnCounter: 0,
           createdAt: now,
         },

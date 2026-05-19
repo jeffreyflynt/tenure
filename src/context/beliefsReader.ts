@@ -12,22 +12,53 @@ export interface SearchTextOptions {
   limit?: number;
   minScore?: number;
   scoreDetails?: boolean;
+  excludeIds?: Set<string>;
+  agentId?: string | null;
 }
 
 export class BeliefsReader {
   constructor(private readonly col: Collection<Belief>) {}
 
+  /**
+   * Merges an agent filter with an existing $or clause without clobbering.
+   * MongoDB does not allow multiple $or at the top level of a single filter
+   * object, so when the base query already uses $or we wrap both in $and.
+   */
+  private mergeFilter(
+    base: Record<string, unknown>,
+    agentId: string | null | undefined,
+  ): Record<string, unknown> {
+    if (!agentId) return base;
+
+    const agentOr = [{ agent_id: agentId }, { agent_id: null }];
+
+    if (base.$or) {
+      const existingOr = base.$or;
+      const { $or: _, ...rest } = base;
+      return {
+        ...rest,
+        $and: [{ $or: existingOr }, { $or: agentOr }],
+      };
+    }
+
+    return { ...base, $or: agentOr };
+  }
+
   async listAlwaysOn(
     userId: string,
     scope?: string[],
     limit = 40,
+    agentId?: string | null,
   ): Promise<Belief[]> {
-    const filter: Record<string, unknown> = {
+    const base: Record<string, unknown> = {
       user_id: userId,
       ...ACTIVE_FILTER,
       $or: [{ pinned: true }, { type: "preference" }],
     };
-    if (scope?.length) filter.scope = { $in: scope };
+    if (scope?.length) base.scope = { $in: scope };
+
+    const filter = this.mergeFilter(base, agentId);
+
     return this.col
       .find(filter)
       .sort({ pinned: -1, last_reinforced_at: -1 })
@@ -40,6 +71,7 @@ export class BeliefsReader {
     scope?: string[],
     limit = 40,
     excludeIds: Set<string> = new Set(),
+    agentId?: string | null,
   ): Promise<Belief[]> {
     const base: Record<string, unknown> = {
       user_id: userId,
@@ -53,16 +85,14 @@ export class BeliefsReader {
       base._id = { $nin: [...excludeIds] };
     }
 
-    if (!scope?.length) {
-      return this.col
-        .find(base)
-        .sort({ user_edited: -1, last_reinforced_at: -1 })
-        .limit(limit)
-        .toArray();
+    if (scope?.length) {
+      base.scope = { $in: scope };
     }
 
+    const filter = this.mergeFilter(base, agentId);
+
     return this.col
-      .find({ ...base, scope: { $in: scope } })
+      .find(filter)
       .sort({ user_edited: -1, last_reinforced_at: -1 })
       .limit(limit)
       .toArray();
@@ -73,13 +103,17 @@ export class BeliefsReader {
     scope: string[],
     types?: BeliefType[],
     limit = 40,
+    agentId?: string | null,
   ): Promise<Belief[]> {
-    const filter: Record<string, unknown> = {
+    const base: Record<string, unknown> = {
       user_id: userId,
       ...ACTIVE_FILTER,
       scope: { $in: scope },
     };
-    if (types?.length) filter.type = { $in: types };
+    if (types?.length) base.type = { $in: types };
+
+    const filter = this.mergeFilter(base, agentId);
+
     return this.col.find(filter).limit(limit).toArray();
   }
 
@@ -87,13 +121,14 @@ export class BeliefsReader {
     userId: string,
     query: string,
     scope?: string[],
-    opts: SearchTextOptions & { excludeIds?: Set<string> } = {},
+    opts: SearchTextOptions = {},
   ): Promise<ScoredBelief[]> {
     const {
       limit = 20,
       minScore = 1.0,
       scoreDetails = false,
       excludeIds,
+      agentId,
     } = opts;
 
     if (!query.trim()) return [];
@@ -109,6 +144,21 @@ export class BeliefsReader {
     if (scope?.length) {
       filterClauses.push({
         in: { path: "scope", value: scope },
+      });
+    }
+
+    // Agent isolation: beliefs must belong to this agent or the shared pool.
+    // Uses a compound should with minimumShouldMatch:1 to express OR within
+    // the Atlas Search filter context (which does not support top-level $or).
+    if (agentId) {
+      filterClauses.push({
+        compound: {
+          should: [
+            { equals: { path: "agent_id", value: agentId } },
+            { equals: { path: "agent_id", value: null } },
+          ],
+          minimumShouldMatch: 1,
+        },
       });
     }
 
@@ -190,18 +240,56 @@ export class BeliefsReader {
     userId: string,
     scope?: string[],
     limit = 15,
+    agentId?: string | null,
   ): Promise<Belief[]> {
-    const filter: Record<string, unknown> = {
+    const base: Record<string, unknown> = {
       user_id: userId,
       ...ACTIVE_FILTER,
       type: "open_question",
       pinned: true,
     };
-    if (scope?.length) filter.scope = { $in: scope };
+    if (scope?.length) base.scope = { $in: scope };
+
+    const filter = this.mergeFilter(base, agentId);
+
     return this.col.find(filter).limit(limit).toArray();
   }
 
-  async countActive(userId: string): Promise<number> {
-    return this.col.countDocuments({ user_id: userId, ...ACTIVE_FILTER });
+  async findByCanonicalNames(
+    userId: string,
+    names: string[],
+    scope?: string[],
+    opts: { agentId?: string | null; excludeIds?: Set<string> } = {},
+  ): Promise<Belief[]> {
+    if (names.length === 0) return [];
+
+    const base: Record<string, unknown> = {
+      user_id: userId,
+      canonical_name: { $in: names.map((n) => n.trim().toLowerCase()) },
+      ...ACTIVE_FILTER,
+    };
+
+    if (scope?.length) base.scope = { $in: scope };
+
+    const filter = this.mergeFilter(base, opts.agentId);
+
+    const results = await this.col.find(filter).toArray();
+
+    if (opts.excludeIds?.size) {
+      return results.filter((b) => !opts.excludeIds!.has(b._id));
+    }
+
+    return results;
+  }
+
+  async countActive(userId: string, agentId?: string | null): Promise<number> {
+    const base: Record<string, unknown> = {
+      user_id: userId,
+      ...ACTIVE_FILTER,
+    };
+
+    const filter = this.mergeFilter(base, agentId);
+
+    return this.col.countDocuments(filter);
   }
 }

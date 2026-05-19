@@ -62,6 +62,7 @@ export interface MergeInput {
   sessionId: string;
   turnId: string;
   sourceModel: string;
+  agentId: string | null;
   result: ExtractionResult;
 }
 
@@ -76,7 +77,7 @@ export class BeliefMerger {
   }
 
   async merge(input: MergeInput): Promise<MergeReport> {
-    const { userId, sessionId, turnId, sourceModel, result } = input;
+    const { userId, sessionId, turnId, sourceModel, agentId, result } = input;
 
     const report: MergeReport = {
       decisions: [],
@@ -96,6 +97,7 @@ export class BeliefMerger {
           turnId,
           sourceModel,
           signal,
+          agentId,
         );
         report.decisions.push(decision);
       } catch (e) {
@@ -123,6 +125,7 @@ export class BeliefMerger {
           turnId,
           sourceModel,
           nb,
+          agentId,
         );
         report.decisions.push(decision);
 
@@ -161,6 +164,7 @@ export class BeliefMerger {
           q.canonical_name,
           q.content,
           q.scope,
+          agentId,
         );
         report.newOpenQuestionIds.push(qid);
       } catch (e) {
@@ -196,6 +200,7 @@ export class BeliefMerger {
     turnId: string,
     sourceModel: string,
     nb: NewBelief,
+    agentId: string | null,
   ): Promise<MergeDecision> {
     const matches = await this.writer.findByAliasOrCanonical(
       userId,
@@ -226,6 +231,7 @@ export class BeliefMerger {
           turnId,
           sourceModel,
           nb,
+          agentId,
         );
         return {
           action: MergeAction.INSERTED,
@@ -341,6 +347,7 @@ export class BeliefMerger {
     turnId: string,
     sourceModel: string,
     signal: BeliefUpdateSignal,
+    agentId: string | null,
   ): Promise<MergeDecision> {
     const target = await this.writer.get(userId, signal.belief_id);
     if (!target) {
@@ -381,6 +388,7 @@ export class BeliefMerger {
         try {
           replacementId = await this.writer.create({
             user_id: userId,
+            agent_id: agentId,
             type: target.type,
             subtype: target.subtype,
             canonical_name: newCanonical,
@@ -439,6 +447,30 @@ export class BeliefMerger {
         };
       }
 
+      case "enriched": {
+        if (!signal.new_content) {
+          return {
+            action: MergeAction.NOOP,
+            beliefId: target._id,
+            reason: "enriched signal without new_content",
+          };
+        }
+        const success = await this.writer.enrichContent(
+          userId,
+          target._id,
+          signal.new_content,
+          sessionId,
+          turnId,
+        );
+        return {
+          action: success ? MergeAction.CONTENT_EDITED : MergeAction.NOOP,
+          beliefId: target._id,
+          reason: success
+            ? `appended attribute: "${signal.new_content}"`
+            : "enrich failed — belief not found",
+        };
+      }
+
       default:
         return {
           action: MergeAction.NOOP,
@@ -489,9 +521,11 @@ export class BeliefMerger {
     turnId: string,
     sourceModel: string,
     nb: NewBelief,
+    agentId: string | null,
   ): Promise<string> {
     return this.writer.create({
       user_id: userId,
+      agent_id: agentId,
       type: nb.type as BeliefType,
       subtype: nb.subtype ?? null,
       canonical_name: nb.canonical_name,
@@ -534,9 +568,11 @@ export class BeliefMerger {
     canonicalName: string,
     content: string,
     scope: string[],
+    agentId: string | null,
   ): Promise<string> {
     return this.writer.create({
       user_id: userId,
+      agent_id: agentId,
       type: "open_question",
       subtype: null,
       canonical_name: canonicalName,

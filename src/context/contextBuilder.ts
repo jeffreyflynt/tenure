@@ -68,17 +68,25 @@ export class ContextBuilder {
     userId: string,
     scope: string[],
     query: string,
+    agentId: string | null = null,
   ): Promise<BuiltContext> {
     const { query: expandedQuery, wasNoisy: queryWasNoisy } =
       buildSearchQuery(query);
 
     const [personaDoc, pinnedFacts, questions] = await Promise.all([
       this.persona.get(userId),
-      this.reader.listPinnedFacts(userId, scope, this.budget.maxPinnedFacts),
+      this.reader.listPinnedFacts(
+        userId,
+        scope,
+        this.budget.maxPinnedFacts,
+        new Set(),
+        agentId,
+      ),
       this.reader.listPinnedOpenQuestions(
         userId,
         scope,
         this.budget.maxQuestions,
+        agentId,
       ),
     ]);
 
@@ -90,6 +98,7 @@ export class ContextBuilder {
           minScore: 3,
           scoreDetails: this.budget.scoreDetails,
           excludeIds: pinnedIds,
+          agentId,
         })
       : ([] as ScoredBelief[]);
 

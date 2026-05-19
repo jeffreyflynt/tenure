@@ -7,10 +7,10 @@ import type { PersonaCache } from "../context/personaCache.js";
 const ACTIVE_FILTER = { resolved_at: null, superseded_by: null };
 
 const DEDUP_COMPACTION_PROMPT =
-  `You identify semantically duplicate beliefs and merge them into a single canonical belief.
+  `You identify semantically duplicate beliefs and flag contradictions within a scope.
 
 You will receive a JSON array of belief objects. Return only a JSON object in this exact shape:
-{ "merges": [...], "no_action_ids": [...] }
+{ "merges": [...], "contradictions": [...], "no_action_ids": [...] }
 
 Each merge object:
 {
@@ -23,20 +23,29 @@ Each merge object:
   "belief_type": "<type field copied from keep belief>"
 }
 
+Each contradiction object:
+{
+  "belief_ids": ["<id_a>", "<id_b>"],
+  "reason": "<one sentence: why these beliefs conflict>"
+}
+
 Rules:
 - Only merge when you are highly confident two beliefs express the same fact or preference.
-- When uncertain, leave beliefs separate. Conservative is always correct here.
+- Flag a contradiction when two beliefs assert incompatible things about the same subject.
+  They do NOT need to share a canonical_name — look at semantic content.
+- When uncertain about merge, leave beliefs separate. Conservative is always correct here.
+- When uncertain about contradiction, do not flag. Only flag clear incompatibilities.
 - merged_aliases must include the canonical names of all retired beliefs for search continuity.
-- List every unmerged belief id in no_action_ids.
+- List every unmerged AND non-contradicted belief id in no_action_ids.
 - Return valid JSON only. No prose outside the JSON object.`.trim();
 
 const PREFERENCE_COMPACTION_PROMPT =
-  `You identify semantically duplicate preference beliefs and merge them into a single canonical belief.
-These beliefs shape how future LLM sessions interact with this user, so the merged result must be
-maximally actionable — not just compact.
+  `You identify semantically duplicate preference beliefs, flag contradictions, and merge
+duplicates into a single canonical belief. These beliefs shape how future LLM sessions
+interact with this user, so the merged result must be maximally actionable — not just compact.
 
 You will receive a JSON array of preference belief objects. Return only a JSON object:
-{ "merges": [...], "no_action_ids": [...] }
+{ "merges": [...], "contradictions": [...], "no_action_ids": [...] }
 
 Each merge object:
 {
@@ -49,12 +58,20 @@ Each merge object:
   "belief_type": "preference"
 }
 
+Each contradiction object:
+{
+  "belief_ids": ["<id_a>", "<id_b>"],
+  "reason": "<one sentence: why these preferences conflict>"
+}
+
 Rules:
 - Only merge beliefs that express the same underlying preference.
+- Flag a contradiction when two preferences assert incompatible approaches to the same concern.
 - merged_content must read as a direct instruction a model can act on immediately.
 - Preserve nuance: if one belief adds a condition the other lacks, include it.
+- When uncertain about contradiction, do not flag. Only flag clear incompatibilities.
 - merged_aliases must include all retired canonical_names for search continuity.
-- List every unmerged belief id in no_action_ids.
+- List every unmerged AND non-contradicted belief id in no_action_ids.
 - Return valid JSON only.`.trim();
 
 const EXPERTISE_SYNTHESIS_PROMPT =
@@ -133,15 +150,6 @@ const TYPE_CONFIGS: Record<string, CompactionTypeConfig> = {
   },
 };
 
-/**
- * When two or more inferred beliefs are collapsed into one during compaction,
- * their combined reinforcement_count is checked against this threshold. If it
- * meets or exceeds it, the merged belief is written as active rather than
- * inferred. Two independently extracted inferred beliefs represent separate
- * extraction events, which is qualitatively stronger evidence than simple
- * reinforcement of a single belief, so the bar here is lower than the
- * merger's inferredPromotionCount.
- */
 const INFERRED_PROMOTION_THRESHOLD = 3;
 
 interface CompactionMerge {
@@ -154,6 +162,11 @@ interface CompactionMerge {
   belief_type: string;
 }
 
+interface DetectedContradiction {
+  belief_ids: [string, string];
+  reason: string;
+}
+
 interface ExpertiseAssessment {
   domain: string;
   depth: ExpertiseDepth;
@@ -163,6 +176,18 @@ interface ExpertiseAssessment {
   why_it_matters: string;
   scope: string[];
   confidence: number;
+}
+
+export interface BeliefContradiction {
+  _id: string;
+  user_id: string;
+  agent_id: string | null;
+  scope: string;
+  belief_ids: [string, string];
+  reason: string;
+  status: "pending" | "resolved";
+  detected_at: Date;
+  resolved_at: Date | null;
 }
 
 export interface CompactionLogEntry {
@@ -178,10 +203,19 @@ export interface CompactionRunnerOptions {
   cooldownMs?: number;
 }
 
+/**
+ * Represents a unique scope + agent_id partition that qualifies for compaction.
+ */
+interface QualifyingPartition {
+  scope: string;
+  agentId: string | null;
+}
+
 export class BeliefCompactionRunner {
   constructor(
     private readonly beliefs: Collection<Belief>,
     private readonly compactionLog: Collection<CompactionLogEntry>,
+    private readonly contradictions: Collection<BeliefContradiction>,
     private readonly resolveAdapter: () => ProviderAdapter,
     private readonly modelId: string | null,
     private readonly personaCache: PersonaCache,
@@ -193,29 +227,37 @@ export class BeliefCompactionRunner {
 
   async run(userId: string): Promise<void> {
     for (const [beliefType, config] of Object.entries(TYPE_CONFIGS)) {
-      const qualifyingScopes = await this.findQualifyingScopes(
+      const qualifyingPartitions = await this.findQualifyingPartitions(
         userId,
         beliefType,
         config,
       );
-      for (const scope of qualifyingScopes) {
-        await this.compact(userId, scope, beliefType, config).catch(
-          (err: unknown) => {
-            console.error(
-              `[compaction] failed user=${userId} scope=${scope} type=${beliefType}:`,
-              err,
-            );
-          },
-        );
+      for (const partition of qualifyingPartitions) {
+        await this.compact(
+          userId,
+          partition.scope,
+          partition.agentId,
+          beliefType,
+          config,
+        ).catch((err: unknown) => {
+          console.error(
+            `[compaction] failed user=${userId} scope=${partition.scope} agent=${partition.agentId} type=${beliefType}:`,
+            err,
+          );
+        });
       }
     }
   }
 
-  private async findQualifyingScopes(
+  /**
+   * Finds scope + agent_id partitions that have accumulated enough beliefs
+   * to warrant compaction and are not on cooldown.
+   */
+  private async findQualifyingPartitions(
     userId: string,
     beliefType: string,
     config: CompactionTypeConfig,
-  ): Promise<string[]> {
+  ): Promise<QualifyingPartition[]> {
     const typeFilter =
       beliefType === "expertise"
         ? { type: "preference", subtype: "expertise" }
@@ -226,15 +268,20 @@ export class BeliefCompactionRunner {
 
     const cooldownMs = this.options.cooldownMs ?? config.cooldownMs;
 
-    const [countsByScope, recentRuns] = await Promise.all([
+    const [countsByPartition, recentRuns] = await Promise.all([
       this.beliefs
         .aggregate<{
-          _id: string;
+          _id: { scope: string; agent_id: string | null };
           count: number;
         }>([
           { $match: { user_id: userId, ...ACTIVE_FILTER, ...typeFilter } },
           { $unwind: "$scope" },
-          { $group: { _id: "$scope", count: { $sum: 1 } } },
+          {
+            $group: {
+              _id: { scope: "$scope", agent_id: "$agent_id" },
+              count: { $sum: 1 },
+            },
+          },
           { $match: { count: { $gte: config.threshold } } },
         ])
         .toArray(),
@@ -247,15 +294,22 @@ export class BeliefCompactionRunner {
         .toArray(),
     ]);
 
-    if (countsByScope.length === 0) return [];
+    if (countsByPartition.length === 0) return [];
 
     const recentScopes = new Set(recentRuns.map((r) => r.scope));
-    return countsByScope.map((s) => s._id).filter((s) => !recentScopes.has(s));
+
+    return countsByPartition
+      .filter((p) => !recentScopes.has(p._id.scope))
+      .map((p) => ({
+        scope: p._id.scope,
+        agentId: p._id.agent_id ?? null,
+      }));
   }
 
   private async compact(
     userId: string,
     scope: string,
+    agentId: string | null,
     beliefType: string,
     config: CompactionTypeConfig,
   ): Promise<void> {
@@ -267,13 +321,36 @@ export class BeliefCompactionRunner {
             $or: [{ subtype: null }, { subtype: { $exists: false } }],
           };
 
+    const agentFilter: Record<string, unknown> = agentId
+      ? { $or: [{ agent_id: agentId }, { agent_id: null }] }
+      : { agent_id: null };
+
+    const baseFilter: Record<string, unknown> = {
+      user_id: userId,
+      scope: { $in: [scope] },
+      ...ACTIVE_FILTER,
+    };
+
+    const typeOr = (typeFilter as Record<string, unknown>).$or;
+    const agentOr = (agentFilter as Record<string, unknown>).$or;
+
+    if (typeOr && agentOr) {
+      const { $or: _, ...typeRest } = typeFilter as Record<string, unknown>;
+      Object.assign(baseFilter, typeRest);
+      baseFilter.$and = [{ $or: typeOr }, { $or: agentOr }];
+    } else if (typeOr) {
+      Object.assign(baseFilter, typeFilter);
+      Object.assign(baseFilter, agentFilter);
+    } else if (agentOr) {
+      Object.assign(baseFilter, typeFilter);
+      baseFilter.$or = agentOr;
+    } else {
+      Object.assign(baseFilter, typeFilter);
+      Object.assign(baseFilter, agentFilter);
+    }
+
     const scopeBeliefs = await this.beliefs
-      .find({
-        user_id: userId,
-        scope: { $in: [scope] },
-        ...ACTIVE_FILTER,
-        ...typeFilter,
-      } as Filter<Belief>)
+      .find(baseFilter as Filter<Belief>)
       .toArray();
 
     if (scopeBeliefs.length < config.threshold) return;
@@ -281,32 +358,51 @@ export class BeliefCompactionRunner {
     if (config.isExpertiseSynthesis) {
       await this.compactExpertise(userId, scope, scopeBeliefs, config);
     } else {
-      await this.compactDedup(userId, scope, scopeBeliefs, config, beliefType);
+      await this.compactDedup(
+        userId,
+        scope,
+        agentId,
+        scopeBeliefs,
+        config,
+        beliefType,
+      );
     }
   }
 
   private async compactDedup(
     userId: string,
     scope: string,
+    agentId: string | null,
     beliefs: Belief[],
     config: CompactionTypeConfig,
     beliefType: string,
   ): Promise<void> {
-    const merges = await this.callDedupLLM(beliefs, config.prompt);
+    const { merges, contradictions } = await this.callDedupLLM(
+      beliefs,
+      config.prompt,
+    );
     await this.logRun(userId, scope, beliefType, merges.length);
 
     if (config.invalidatesPersona && scope === "user:universal") {
       await this.personaCache.invalidate(userId);
     }
 
-    if (merges.length === 0) return;
-    await this.applyDedupMerges(userId, merges);
+    if (merges.length > 0) {
+      await this.applyDedupMerges(userId, merges);
+    }
+
+    if (contradictions.length > 0) {
+      await this.persistContradictions(userId, scope, agentId, contradictions);
+    }
   }
 
   private async callDedupLLM(
     beliefs: Belief[],
     prompt: string,
-  ): Promise<CompactionMerge[]> {
+  ): Promise<{
+    merges: CompactionMerge[];
+    contradictions: DetectedContradiction[];
+  }> {
     const payload = beliefs.map((b) => ({
       id: b._id,
       type: b.type,
@@ -321,15 +417,68 @@ export class BeliefCompactionRunner {
         model: this.modelId ?? "",
         messages: [{ role: "user", content: JSON.stringify(payload) }],
         temperature: 0.1,
-        max_tokens: 2000,
+        max_tokens: 20000,
       },
       prompt,
     );
 
     const parsed = JSON.parse(this.extractJson(resp.content)) as {
       merges?: CompactionMerge[];
+      contradictions?: DetectedContradiction[];
     };
-    return Array.isArray(parsed.merges) ? parsed.merges : [];
+
+    return {
+      merges: Array.isArray(parsed.merges) ? parsed.merges : [],
+      contradictions: Array.isArray(parsed.contradictions)
+        ? parsed.contradictions
+        : [],
+    };
+  }
+
+  private async persistContradictions(
+    userId: string,
+    scope: string,
+    agentId: string | null,
+    contradictions: DetectedContradiction[],
+  ): Promise<void> {
+    const now = new Date();
+
+    const existingPending = await this.contradictions
+      .find({
+        user_id: userId,
+        scope,
+        agent_id: agentId,
+        status: "pending",
+      })
+      .toArray();
+
+    const existingPairs = new Set(
+      existingPending.map((c) => [...c.belief_ids].sort().join("|")),
+    );
+
+    const novel = contradictions.filter((c) => {
+      if (!Array.isArray(c.belief_ids) || c.belief_ids.length !== 2) {
+        return false;
+      }
+      const key = [...c.belief_ids].sort().join("|");
+      return !existingPairs.has(key);
+    });
+
+    if (novel.length === 0) return;
+
+    const docs: BeliefContradiction[] = novel.map((c) => ({
+      _id: randomUUID(),
+      user_id: userId,
+      agent_id: agentId,
+      scope,
+      belief_ids: c.belief_ids,
+      reason: c.reason,
+      status: "pending",
+      detected_at: now,
+      resolved_at: null,
+    }));
+
+    await this.contradictions.insertMany(docs);
   }
 
   private async applyDedupMerges(
@@ -357,11 +506,6 @@ export class BeliefCompactionRunner {
         source.last_reinforced_at,
       );
 
-      // Promote the merged belief to active if all contributing beliefs were
-      // inferred and their combined reinforcement count crosses the threshold.
-      // Two independently extracted inferred beliefs collapsing into one is
-      // stronger evidence than simple reinforcement of a single belief, so the
-      // promotion bar here is intentionally lower than the merger's threshold.
       const allInferred = mergeSources.every(
         (b) => b.epistemic_status === "inferred",
       );
@@ -437,6 +581,7 @@ export class BeliefCompactionRunner {
       await this.personaSummary.regenerate(userId);
     }
   }
+
   private async callExpertiseLLM(beliefs: Belief[]): Promise<{
     assessments: ExpertiseAssessment[];
     retireIds: string[];
@@ -485,8 +630,6 @@ export class BeliefCompactionRunner {
     const sourceIds = sourceBeliefsForUser.map((b) => b._id);
 
     for (const assessment of assessments) {
-      // Check if an active expertise belief already exists for this domain.
-      // If so, supersede it so the assessment is always the current view.
       const existing = await this.beliefs.findOne({
         user_id: userId,
         subtype: "expertise",
@@ -499,6 +642,8 @@ export class BeliefCompactionRunner {
       const newBelief: Belief = {
         _id: newId,
         user_id: userId,
+        agent_id:
+          existing?.agent_id ?? sourceBeliefsForUser[0]?.agent_id ?? null,
         type: "preference",
         subtype: "expertise",
         canonical_name: assessment.canonical_name,

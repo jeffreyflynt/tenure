@@ -1,8 +1,8 @@
 ---
 name: tenure
 description: >
-  Persistent local memory for OpenClaw. Beliefs stored as actionable instructions,
-  not facts. Zero-config per-agent isolation. Fully local, nothing leaves localhost.
+  Install, set up, or onboard Tenure — persistent local memory for OpenClaw.
+  Run when the user asks to install Tenure, set up memory, or run !tenure onboarding.
 version: 1.0.0
 user-invocable: true
 metadata:
@@ -165,7 +165,7 @@ Tell the user:
 > "Tenure is installed and running. Your existing provider is still active — Tenure sits in front of it and adds memory automatically.
 >
 > - **Token:** `<value from step 6>`
-> - **Base URL:** `http://localhost:5757/v1`
+> - **UI URL:** `http://localhost:5757`
 >
 > Run **!tenure onboarding** when you're ready to set up your memory — takes about 2 minutes.
 >

@@ -20,7 +20,6 @@ const STRIP_PATTERNS: RegExp[] = [
   /[?!.,;:]+(?=\s|$)/g,
 ];
 
-// Lines that are almost certainly code regardless of fencing
 const CODE_LINE =
   /^\s*(const|let|var|function|class|import|export|default|return|async|await|if|else|for|while|switch|try|catch|def |class |from \w+ import|fn |impl |use std::|package |func |:=|\/\/|#!?[^\s]|\/\*|\*\/?\s)/;
 
@@ -160,11 +159,9 @@ export function buildSearchQuery(userMessage: string): ExpandedQuery {
     return { query: raw, cleaned: raw, wasNoisy: false };
   }
 
-  // Segment into text vs code portions
   const segments = segmentMessage(raw);
   const hasExplicitCode = segments.some((s) => s.type === "code");
 
-  // For unfenced pastes, re-segment by line heuristic
   const working = hasExplicitCode ? segments : splitUnfencedCode(raw);
 
   const textOnly = working
@@ -175,7 +172,6 @@ export function buildSearchQuery(userMessage: string): ExpandedQuery {
 
   const cleaned = stripNoise(textOnly || raw);
 
-  // Natural language portion is too thin to search on — try language fallback
   if (!cleaned || cleaned.length < MIN_RAW_CHARS) {
     const codeContent = working.find((s) => s.type === "code")?.content ?? raw;
     const lang =
