@@ -40,6 +40,7 @@ export interface RuntimeConfig {
   injection_enabled: boolean;
   compaction_mode: "aggressive" | "conservative" | "off";
   scope_auto_detect: boolean;
+  ide_extraction_enabled: boolean;
 }
 
 export const DEFAULTS: RuntimeConfig = {
@@ -60,6 +61,7 @@ export const DEFAULTS: RuntimeConfig = {
   injection_enabled: true,
   compaction_mode: "aggressive",
   scope_auto_detect: true,
+  ide_extraction_enabled: true,
 };
 
 const ENCRYPTED_KEYS = new Set<keyof RuntimeConfig>([

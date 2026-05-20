@@ -184,7 +184,7 @@ export class AnthropicAdapter implements ProviderAdapter {
     return {
       model: req.model,
       messages: conversation,
-      max_tokens: req.max_tokens ?? 8192,
+      max_tokens: req.max_tokens ?? 120000,
       ...(system !== undefined ? { system } : {}),
       ...(req.temperature !== undefined
         ? { temperature: req.temperature }

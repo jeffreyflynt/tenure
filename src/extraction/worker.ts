@@ -144,6 +144,17 @@ export class ExtractionWorker implements ExtractionWorkerLike {
       return [];
     }
 
+    const enforced =
+      payload.extraction_mode === "ide" &&
+      payload.workspace_context?.project_scope
+        ? enforceIdeScope(result, payload.workspace_context.project_scope)
+        : result;
+
+    const activePackage = job.payload.workspace_context?.active_package ?? null;
+    const enriched = activePackage
+      ? injectPackageAlias(enforced, activePackage)
+      : enforced;
+
     if (skippedBeliefs.length > 0) {
       await this.jobs.updateOne(
         { _id: job._id },
@@ -151,7 +162,7 @@ export class ExtractionWorker implements ExtractionWorkerLike {
       );
     }
 
-    return this.merge(job, result);
+    return this.merge(job, enriched);
   }
 
   private async extractOnboarding(job: ExtractionJob): Promise<string[]> {
@@ -305,5 +316,76 @@ function checkContradictions(result: ExtractionResult): ExtractionResult {
     new_beliefs: result.new_beliefs.filter(
       (nb) => !conflicts.has(nb.canonical_name.trim().toLowerCase()),
     ),
+  };
+}
+
+function injectPackageAlias(
+  result: ExtractionResult,
+  activePackage: string,
+): ExtractionResult {
+  const slug = activePackage
+    .toLowerCase()
+    .replace(/^@[^/]+\//, "")
+    .replace(/[^a-z0-9-]/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+
+  if (!slug) return result;
+
+  return {
+    ...result,
+    new_beliefs: result.new_beliefs.map((nb) => {
+      const hasProjectScope = nb.scope.some((s) => s.startsWith("project:"));
+      if (!hasProjectScope) return nb;
+
+      if (nb.aliases.includes(slug)) return nb;
+
+      return { ...nb, aliases: [...nb.aliases, slug] };
+    }),
+  };
+}
+
+/**
+ * Replaces any project:* scope on extracted beliefs with the authoritative
+ * resolved project scope from the workspace context. This runs in code after
+ * the model has emitted its sidecar so the model cannot override it.
+ *
+ * Rules:
+ * - user:universal is always preserved as-is
+ * - domain:* scopes are preserved as-is
+ * - project:* scopes are replaced with the resolved project scope
+ * - beliefs with no scope receive the resolved project scope
+ * - beliefs with only domain:* scopes also receive the resolved project scope
+ * - beliefs with only user:universal keep only user:universal
+ */
+function enforceIdeScope(
+  result: ExtractionResult,
+  resolvedProjectScope: string,
+): ExtractionResult {
+  return {
+    ...result,
+    new_beliefs: result.new_beliefs.map((nb) => {
+      if (nb.scope.length === 1 && nb.scope[0] === "user:universal") {
+        return nb;
+      }
+
+      const preserved = nb.scope.filter(
+        (s) => s === "user:universal" || s.startsWith("domain:"),
+      );
+
+      const hadProjectScope = nb.scope.some((s) => s.startsWith("project:"));
+      const hadNoScope = nb.scope.length === 0;
+      const hadOnlyDomainScopes =
+        !hadProjectScope &&
+        !hadNoScope &&
+        nb.scope.every((s) => s.startsWith("domain:"));
+
+      if (hadProjectScope || hadNoScope || hadOnlyDomainScopes) {
+        const enforced = [...new Set([...preserved, resolvedProjectScope])];
+        return { ...nb, scope: enforced };
+      }
+
+      return nb;
+    }),
   };
 }

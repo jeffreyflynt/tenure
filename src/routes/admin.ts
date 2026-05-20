@@ -159,7 +159,11 @@ export function registerAdminRoutes(
           provider: 1,
           model: 1,
           session_id: 1,
+          turn_id: 1,
           user_impacted: 1,
+          passthrough_succeeded: 1,
+          exception_type: 1,
+          stack_trace: 1,
         })
         .toArray();
       return {

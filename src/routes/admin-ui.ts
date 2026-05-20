@@ -979,13 +979,26 @@ async function loadErrors() {
     }
 
     el.innerHTML = data.errors.map(e => \`
-      <div style="background:var(--surface2);border-radius:4px;padding:.5rem .65rem;margin-bottom:.35rem;border-left:2px solid \${e.severity === 'error' ? 'var(--danger)' : e.severity === 'critical' ? 'var(--danger)' : '#d4a84b'}">
-        <div style="display:flex;justify-content:space-between;gap:.5rem">
-          <span style="color:var(--text);font-size:.78rem">\${esc(e.stage)}</span>
-          <span style="font-size:.72rem">\${new Date(e.occurred_at).toLocaleString()}</span>
+      <div style="background:var(--surface2);border-radius:4px;padding:.5rem .65rem;margin-bottom:.5rem;border-left:2px solid \${e.severity === 'error' || e.severity === 'critical' ? 'var(--danger)' : '#d4a84b'}">
+        <div style="display:flex;justify-content:space-between;gap:.5rem;margin-bottom:.2rem">
+          <span style="color:var(--text);font-size:.78rem;font-weight:500">\${esc(e.severity)}/\${esc(e.stage)}</span>
+          <span style="font-size:.72rem;color:var(--muted)">\${new Date(e.occurred_at).toLocaleString()}</span>
         </div>
-        <div style="margin-top:.2rem;color:var(--text);font-size:.8rem;word-break:break-word">\${esc(e.message)}</div>
-        \${e.provider ? \`<span style="font-size:.7rem">provider: \${esc(e.provider)}</span>\` : ""}
+        <div style="color:var(--text);font-size:.8rem;word-break:break-word;margin-bottom:.35rem">\${esc(e.message)}</div>
+        <div style="display:flex;flex-wrap:wrap;gap:.4rem .75rem;font-size:.72rem;color:var(--muted)">
+          \${e.provider ? \`<span>provider: <code style="color:var(--text)">\${esc(e.provider)}</code></span>\` : ""}
+          \${e.model ? \`<span>model: <code style="color:var(--text)">\${esc(e.model)}</code></span>\` : ""}
+          \${e.session_id ? \`<span>session: <code style="color:var(--text)">\${esc(e.session_id)}</code></span>\` : ""}
+          \${e.turn_id ? \`<span>turn: <code style="color:var(--text)">\${esc(e.turn_id)}</code></span>\` : ""}
+          \${e.exception_type ? \`<span>exception: <code style="color:var(--text)">\${esc(e.exception_type)}</code></span>\` : ""}
+          \${e.user_impacted ? \`<span style="color:var(--danger)">user impacted</span>\` : ""}
+          \${e.passthrough_succeeded === true ? \`<span style="color:var(--ok)">response delivered</span>\` : e.passthrough_succeeded === false ? \`<span style="color:var(--danger)">response failed</span>\` : ""}
+        </div>
+        \${e.stack_trace ? \`
+        <details style="margin-top:.35rem">
+          <summary style="font-size:.72rem;color:var(--muted);cursor:pointer">Stack trace</summary>
+          <pre style="font-size:.7rem;color:var(--muted);overflow-x:auto;margin-top:.25rem;white-space:pre-wrap;word-break:break-all">\${esc(e.stack_trace.slice(0, 1500))}</pre>
+        </details>\` : ""}
       </div>
     \`).join("");
   } catch (e) {
@@ -999,9 +1012,18 @@ async function copyErrors() {
     const data = await res.json();
     if (!res.ok) throw new Error(\`HTTP \${res.status}\`);
 
-    const text = data.errors.map(e =>
-      \`[\${e.occurred_at}] \${e.severity}/\${e.stage}: \${e.message}\${e.provider ? \` (\${e.provider})\` : ""}\${e.session_id ? \` session=\${e.session_id}\` : ""}\`
-    ).join("\\n");
+    const text = data.errors.map(e => [
+      \`[\${e.occurred_at}] \${e.severity}/\${e.stage}: \${e.message}\`,
+      e.provider        ? \`  provider: \${e.provider}\`                         : null,
+      e.model           ? \`  model: \${e.model}\`                                : null,
+      e.session_id      ? \`  session: \${e.session_id}\`                         : null,
+      e.turn_id         ? \`  turn: \${e.turn_id}\`                               : null,
+      e.exception_type  ? \`  exception: \${e.exception_type}\`                   : null,
+      e.user_impacted !== undefined ? \`  user_impacted: \${e.user_impacted}\`    : null,
+      e.passthrough_succeeded !== null && e.passthrough_succeeded !== undefined
+        ? \`  passthrough_succeeded: \${e.passthrough_succeeded}\`                : null,
+      e.stack_trace ? \`  stack:\\n\${e.stack_trace.split("\\n").slice(0, 6).map(l => \`    \${l}\`).join("\\n")}\` : null,
+    ].filter(Boolean).join("\\n")).join("\\n\\n");
 
     await navigator.clipboard.writeText(text || "No errors recorded.");
     toast("Copied to clipboard", "ok");

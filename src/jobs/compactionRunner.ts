@@ -604,7 +604,7 @@ export class BeliefCompactionRunner {
         model: this.modelId ?? "",
         messages: [{ role: "user", content: JSON.stringify(payload) }],
         temperature: 0.1,
-        max_tokens: 3000,
+        max_tokens: 5000,
       },
       EXPERTISE_SYNTHESIS_PROMPT,
     );

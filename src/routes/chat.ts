@@ -43,6 +43,8 @@ import {
 } from "../helpers/scopeDetector.js";
 import type { ErrorLogger } from "../errors/logger.js";
 import { parseClient, type ParsedClient } from "../helpers/clientDetector.js";
+import type { WorkspaceStateCache } from "../workspace/stateCache.js";
+import { buildIdeSidecarInstructions } from "../sidecar/idePrompt.js";
 
 export interface ChatDeps {
   sessions: SessionManager;
@@ -55,6 +57,7 @@ export interface ChatDeps {
   runtimeStore: RuntimeConfigStore;
   scopeDetector?: ScopeDetectorDeps;
   errorLogger: ErrorLogger;
+  workspaceState?: WorkspaceStateCache;
 }
 
 interface ResolveScopeArgs {
@@ -411,18 +414,25 @@ export function registerChatRoute(app: FastifyInstance, deps: ChatDeps): void {
       req.headers["x-tenure-bootstrapping"] === "1" ||
       req.headers["x-tenure-bootstrapping"] === "true";
 
+    const isIdeTurn =
+      req.headers["x-tenure-ide"] === "1" ||
+      req.headers["x-tenure-ide"] === "true";
+
+    const ideExtractionEnabled = (cfg as any).ide_extraction_enabled !== false;
+
     const extractionEnabled =
       cfg.extraction_enabled !== false &&
       session?.extractionPaused !== true &&
-      !client.isIde &&
       !noExtractHeader &&
-      !bootstrapInProgress;
+      !bootstrapInProgress &&
+      (isIdeTurn ? ideExtractionEnabled : true);
 
     const injectionEnabled =
       cfg.injection_enabled !== false &&
       session?.injectionPaused !== true &&
-      !client.isIde &&
       !bootstrapInProgress;
+
+    const extractionMode: "standard" | "ide" = isIdeTurn ? "ide" : "standard";
 
     const agentId = ocAgentId && ocAgentId !== "main" ? ocAgentId : null;
 
@@ -447,6 +457,47 @@ export function registerChatRoute(app: FastifyInstance, deps: ChatDeps): void {
           ? incomingSystem
           : extractText(incomingSystem);
 
+    let ideScope: {
+      projectScope: string | null;
+      languageScope: string | null;
+    } | null = null;
+
+    let activePackage: string | null = null;
+
+    if (isIdeTurn) {
+      const headerProject = req.headers["x-tenure-project"] as
+        | string
+        | undefined;
+      const headerLanguage = req.headers["x-tenure-language"] as
+        | string
+        | undefined;
+
+      ideScope = {
+        projectScope: headerProject
+          ? `project:${headerProject
+              .toLowerCase()
+              .replace(/[^a-z0-9-]/g, "-")
+              .replace(/-+/g, "-")
+              .replace(/^-|-$/g, "")}`
+          : null,
+        languageScope: headerLanguage
+          ? `domain:code/${headerLanguage.toLowerCase()}`
+          : null,
+      };
+
+      if (!ideScope.projectScope && deps.workspaceState) {
+        ideScope.projectScope = deps.workspaceState.resolveProjectScope(userId);
+        ideScope.languageScope =
+          ideScope.languageScope ??
+          deps.workspaceState.resolveLanguageScope(userId);
+      }
+
+      if (deps.workspaceState) {
+        const wsState = deps.workspaceState.get(userId);
+        activePackage = wsState?.active_package ?? null;
+      }
+    }
+
     try {
       systemPrompt = buildSystemPrompt({
         incomingSystem: incomingSystemText,
@@ -455,6 +506,8 @@ export function registerChatRoute(app: FastifyInstance, deps: ChatDeps): void {
         injectionEnabled,
         activeScope: scope[0],
         scopeAutoDetect: cfg.scope_auto_detect !== false,
+        extractionMode,
+        ideScope,
       });
     } catch (err) {
       req.log.error(
@@ -482,6 +535,9 @@ export function registerChatRoute(app: FastifyInstance, deps: ChatDeps): void {
       passThrough,
     };
 
+    const ideLanguageScope = ideScope?.languageScope ?? null;
+    const ideActiveFile = deps.workspaceState?.get(userId)?.active_file ?? null;
+
     if (stream && adapter.callStream) {
       return handleStreamingResponse(
         reply,
@@ -508,6 +564,11 @@ export function registerChatRoute(app: FastifyInstance, deps: ChatDeps): void {
           injectionEnabled,
           client,
           agentId,
+          extractionMode,
+          ideProjectScope: ideScope?.projectScope ?? null,
+          activePackage,
+          ideLanguageScope,
+          ideActiveFile,
         },
       );
     }
@@ -615,6 +676,11 @@ export function registerChatRoute(app: FastifyInstance, deps: ChatDeps): void {
         extractionEnabled,
         client,
         agentId,
+        extractionMode,
+        ideProjectScope: ideScope?.projectScope ?? null,
+        activePackage,
+        ideLanguageScope: ideScope?.languageScope ?? null,
+        ideActiveFile: deps.workspaceState?.get(userId)?.active_file ?? null,
       });
     } catch (err) {
       req.log.error(
@@ -643,6 +709,11 @@ interface StreamingCtx {
   injectionEnabled: boolean;
   client: ParsedClient;
   agentId: string | null;
+  extractionMode: "standard" | "ide";
+  ideProjectScope: string | null;
+  activePackage: string | null;
+  ideLanguageScope: string | null;
+  ideActiveFile: string | null;
 }
 
 async function handleStreamingResponse(
@@ -849,6 +920,11 @@ async function handleStreamingResponse(
     extractionEnabled: ctx.extractionEnabled,
     client: ctx.client,
     agentId: ctx.agentId,
+    extractionMode: ctx.extractionMode,
+    ideProjectScope: ctx.ideProjectScope,
+    activePackage: ctx.activePackage,
+    ideLanguageScope: ctx.ideLanguageScope,
+    ideActiveFile: ctx.ideActiveFile,
   });
 }
 
@@ -882,6 +958,11 @@ interface SideEffectInput {
   logger: FastifyBaseLogger;
   extractionEnabled: boolean;
   client: ParsedClient;
+  extractionMode: "standard" | "ide";
+  activePackage: string | null;
+  ideProjectScope: string | null;
+  ideLanguageScope: string | null;
+  ideActiveFile: string | null;
 }
 
 async function runSideEffects(input: SideEffectInput): Promise<void> {
@@ -913,6 +994,16 @@ async function runSideEffects(input: SideEffectInput): Promise<void> {
 
   if (input.extractionEnabled) {
     try {
+      const workspaceContext =
+        input.ideProjectScope || input.activePackage
+          ? ({
+              project_scope: input.ideProjectScope,
+              language_scope: input.ideLanguageScope,
+              active_file: input.ideActiveFile,
+              active_package: input.activePackage,
+            } as const)
+          : undefined;
+
       const jobId = await input.deps.jobs.enqueue({
         userId: input.userId,
         sessionId: input.sessionId,
@@ -925,6 +1016,8 @@ async function runSideEffects(input: SideEffectInput): Promise<void> {
         sourceModel: `${input.adapter.id}:${input.model}`,
         clientCategory: input.client.category,
         agentId: input.agentId,
+        extractionMode: input.extractionMode,
+        ...(workspaceContext !== undefined && { workspaceContext }),
       });
       input.deps.extractionWorker
         .processById(jobId)
@@ -974,6 +1067,11 @@ interface BuildSystemPromptArgs {
   injectionEnabled: boolean;
   activeScope: string | undefined;
   scopeAutoDetect: boolean;
+  extractionMode?: "standard" | "ide";
+  ideScope?: {
+    projectScope: string | null;
+    languageScope: string | null;
+  } | null;
 }
 
 function buildSystemPrompt(args: BuildSystemPromptArgs): SystemPromptParts {
@@ -987,11 +1085,25 @@ function buildSystemPrompt(args: BuildSystemPromptArgs): SystemPromptParts {
         "their preferences, decisions, project commitments, working principles, " +
         "and how they think and engage. " +
         "Respond fully first; the extraction format follows.",
-      buildSidecarInstructions({
-        activeScope: args.activeScope,
-        scopeAutoDetect: args.scopeAutoDetect,
-      }),
     );
+
+    if (args.extractionMode === "ide" && args.ideScope) {
+      staticParts.push(
+        buildIdeSidecarInstructions({
+          activeScope: args.activeScope,
+          scopeAutoDetect: args.scopeAutoDetect,
+          projectScope: args.ideScope.projectScope,
+          languageScope: args.ideScope.languageScope,
+        }),
+      );
+    } else {
+      staticParts.push(
+        buildSidecarInstructions({
+          activeScope: args.activeScope,
+          scopeAutoDetect: args.scopeAutoDetect,
+        }),
+      );
+    }
   }
 
   if (args.injectionEnabled) {

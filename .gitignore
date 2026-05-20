@@ -11,3 +11,7 @@ start.sh
 coverage/
 *.patch
 *.tgz
+.vscode-test
+.vscode
+out/
+.vsix

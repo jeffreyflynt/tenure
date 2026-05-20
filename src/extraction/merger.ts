@@ -31,6 +31,8 @@ export interface MergePolicy {
    * through repeated reinforcement of the same causal chain.
    */
   inferredPromotionAgeMs: number;
+  demonstratedPromotionCount: number;
+  demonstratedPromotionAgeMs: number;
 }
 
 const DEFAULT_POLICY: MergePolicy = {
@@ -39,6 +41,8 @@ const DEFAULT_POLICY: MergePolicy = {
   maxAliasesPerBelief: 25,
   inferredPromotionCount: 5,
   inferredPromotionAgeMs: 48 * 60 * 60 * 1000,
+  demonstratedPromotionCount: 3,
+  demonstratedPromotionAgeMs: 24 * 60 * 60 * 1000,
 };
 
 export interface MergeDecision {
@@ -333,10 +337,21 @@ export class BeliefMerger {
     if (!belief || belief.epistemic_status !== "inferred") return;
 
     const ageMs = Date.now() - belief.created_at.getTime();
-    if (
-      belief.reinforcement_count >= this.policy.inferredPromotionCount &&
-      ageMs >= this.policy.inferredPromotionAgeMs
-    ) {
+    const isDemonstrated = belief.change_log.some(
+      (cl) =>
+        cl.trigger.includes("demonstrated") ||
+        cl.trigger.includes("config_artifact"),
+    );
+
+    const requiredCount = isDemonstrated
+      ? this.policy.demonstratedPromotionCount
+      : this.policy.inferredPromotionCount;
+
+    const requiredAge = isDemonstrated
+      ? this.policy.demonstratedPromotionAgeMs
+      : this.policy.inferredPromotionAgeMs;
+
+    if (belief.reinforcement_count >= requiredCount && ageMs >= requiredAge) {
       await this.writer.promoteToActive(userId, beliefId, sessionId, turnId);
     }
   }
@@ -523,6 +538,10 @@ export class BeliefMerger {
     nb: NewBelief,
     agentId: string | null,
   ): Promise<string> {
+    const trigger = nb.provenance_hint
+      ? `initial extraction (${nb.provenance_hint})`
+      : "initial extraction";
+
     return this.writer.create({
       user_id: userId,
       agent_id: agentId,
@@ -552,7 +571,7 @@ export class BeliefMerger {
       change_log: [
         {
           changed_at: new Date(),
-          trigger: "initial extraction",
+          trigger,
           changed_by_session: sessionId,
           changed_by_turn: turnId,
         },

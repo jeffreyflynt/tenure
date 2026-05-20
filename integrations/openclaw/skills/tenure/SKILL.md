@@ -8,7 +8,7 @@ user-invocable: true
 metadata:
   openclaw:
     emoji: "🧠"
-    homepage: "https://github.com/jeffreyflynt/tenure"
+    homepage: "https://github.com/tenurehq/tenure"
     requires:
       bins:
         - docker

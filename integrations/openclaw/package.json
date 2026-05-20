@@ -1,11 +1,11 @@
 {
   "name": "@tenureai/openclaw-plugin",
-  "version": "1.0.13",
+  "version": "1.0.14",
   "description": "Persistent local memory for OpenClaw. Tenure stores beliefs as actionable instructions, not just facts, so the model acts on context immediately without inference. Zero-config per-agent isolation, fully local, nothing leaves localhost.",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/jeffreyflynt/tenure.git",
+    "url": "git+https://github.com/tenurehq/tenure.git",
     "directory": "integrations/openclaw"
   },
   "keywords": [

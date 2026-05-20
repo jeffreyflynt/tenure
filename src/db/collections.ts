@@ -18,6 +18,14 @@ export interface ConfigDoc {
   updatedAt: Date;
 }
 
+export interface OnboardingDraftDoc {
+  _id: string;
+  user_id: string;
+  sidecarJson: string;
+  modelId: string;
+  created_at: Date;
+}
+
 export interface TopicIndexEntry {
   _id: string;
   user_id: string;
@@ -38,6 +46,7 @@ export interface Collections {
   persona_cache: Collection<PersonaDoc>;
   compaction_log: Collection<CompactionLogEntry>;
   contradictions: Collection<BeliefContradiction>;
+  onboarding_drafts: Collection<OnboardingDraftDoc>;
 }
 
 export function getCollections(db: Db): Collections {
@@ -53,5 +62,6 @@ export function getCollections(db: Db): Collections {
     persona_cache: db.collection<PersonaDoc>("persona_cache"),
     compaction_log: db.collection<CompactionLogEntry>("compaction_log"),
     contradictions: db.collection<BeliefContradiction>("belief_contradictions"),
+    onboarding_drafts: db.collection<OnboardingDraftDoc>("onboarding_drafts"),
   };
 }

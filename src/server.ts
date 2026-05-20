@@ -31,6 +31,11 @@ import { registerBackupRoutes, type BackupDeps } from "./routes/backup.js";
 import { registerPersonaRoutes, type PersonaDeps } from "./routes/persona.js";
 import { registerCommandsRoute } from "./routes/commands.js";
 import { BeliefWriter } from "./extraction/beliefWriter.js";
+import type { WorkspaceStateCache } from "./workspace/stateCache.js";
+import {
+  registerWorkspaceRoutes,
+  type WorkspaceDeps,
+} from "./routes/workspace.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -65,6 +70,7 @@ export interface ServerDeps {
   compactionRunner: BeliefCompactionRunner;
   extractionWorker: ExtractionWorker;
   personaSummary: PersonaSummaryService;
+  workspaceState: WorkspaceStateCache;
 }
 
 export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
@@ -148,6 +154,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     extractionWorker: deps.extractionWorker,
     runtimeStore: deps.runtimeStore,
     errorLogger: deps.errorLogger,
+    workspaceState: deps.workspaceState,
   };
   registerChatRoute(app, chatDeps);
 
@@ -182,7 +189,7 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     userId: deps.userId,
     personaSummary: deps.personaSummary,
   };
-  registerOnboardingRoutes(app, onboardingDeps);
+  registerOnboardingRoutes(app, onboardingDeps, deps.cols);
 
   registerBeliefsUiRoute(app);
   registerAdminUiRoute(app);
@@ -203,6 +210,12 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   registerPersonaRoutes(app, personaDeps);
 
   registerCommandsRoute(app);
+
+  const workspaceDeps: WorkspaceDeps = {
+    userId: deps.userId,
+    workspaceState: deps.workspaceState,
+  };
+  registerWorkspaceRoutes(app, workspaceDeps);
 
   await app.register(fastifySchedule);
 

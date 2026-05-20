@@ -6,6 +6,8 @@ import type { RuntimeConfigStore } from "../config/runtime.js";
 import { checkModelTier } from "../providers/tiers.js";
 import type { ExtractionWorkerLike } from "../extraction/worker.js";
 import { extractJsonBlock } from "../extraction/extractJson.js";
+import type { Collections, OnboardingDraftDoc } from "../db/collections.js";
+import type { Collection } from "mongodb";
 
 export interface OnboardingDeps {
   providers: ProviderRegistry;
@@ -268,30 +270,43 @@ function validateSidecarShape(parsed: unknown): parsed is ParsedSidecar {
       !belief.why_it_matters.trim()
     )
       return false;
+    if (!Array.isArray(belief.scope)) return false;
   }
   return true;
 }
 
 interface DraftStore {
-  set(draftId: string, data: { sidecarJson: string; modelId: string }): void;
-  take(draftId: string): { sidecarJson: string; modelId: string } | null;
+  set(
+    draftId: string,
+    data: { sidecarJson: string; modelId: string },
+  ): Promise<void>;
+  peek(
+    draftId: string,
+  ): Promise<{ sidecarJson: string; modelId: string } | null>;
+  remove(draftId: string): Promise<void>;
 }
 
-function createDraftStore(ttlMs = 10 * 60 * 1000): DraftStore {
-  const drafts = new Map<
-    string,
-    { sidecarJson: string; modelId: string; expiry: number }
-  >();
+function createDraftStore(
+  collection: Collection<OnboardingDraftDoc>,
+  userId: string,
+): DraftStore {
   return {
-    set(draftId, data) {
-      drafts.set(draftId, { ...data, expiry: Date.now() + ttlMs });
+    async set(draftId, data) {
+      await collection.insertOne({
+        _id: draftId,
+        user_id: userId,
+        sidecarJson: data.sidecarJson,
+        modelId: data.modelId,
+        created_at: new Date(),
+      });
     },
-    take(draftId) {
-      const d = drafts.get(draftId);
-      if (!d) return null;
-      drafts.delete(draftId);
-      if (Date.now() > d.expiry) return null;
-      return { sidecarJson: d.sidecarJson, modelId: d.modelId };
+    async peek(draftId) {
+      const doc = await collection.findOne({ _id: draftId, user_id: userId });
+      if (!doc) return null;
+      return { sidecarJson: doc.sidecarJson, modelId: doc.modelId };
+    },
+    async remove(draftId) {
+      await collection.deleteOne({ _id: draftId, user_id: userId });
     },
   };
 }
@@ -299,8 +314,9 @@ function createDraftStore(ttlMs = 10 * 60 * 1000): DraftStore {
 export function registerOnboardingRoutes(
   app: FastifyInstance,
   deps: OnboardingDeps,
+  cols: Pick<Collections, "onboarding_drafts">,
 ): void {
-  const drafts = createDraftStore();
+  const drafts = createDraftStore(cols.onboarding_drafts, deps.userId);
 
   app.get<{ Querystring: { token?: string } }>(
     "/onboarding",
@@ -511,7 +527,7 @@ export function registerOnboardingRoutes(
       }
 
       const draftId = randomUUID();
-      drafts.set(draftId, { sidecarJson, modelId });
+      await drafts.set(draftId, { sidecarJson, modelId });
 
       return {
         ok: true,
@@ -533,7 +549,7 @@ export function registerOnboardingRoutes(
           .send({ error: { message: "draft_id required" } });
       }
 
-      const draft = drafts.take(draft_id);
+      const draft = await drafts.peek(draft_id);
       if (!draft) {
         return reply.code(404).send({
           error: { message: "draft not found or expired — re-run onboarding" },
@@ -543,7 +559,13 @@ export function registerOnboardingRoutes(
       let finalSidecarJson = draft.sidecarJson;
       if (Array.isArray(edited_beliefs)) {
         const parsed = JSON.parse(draft.sidecarJson) as ParsedSidecar;
-        parsed.new_beliefs = edited_beliefs;
+        parsed.new_beliefs = edited_beliefs.map((b) => ({
+          ...b,
+          scope:
+            Array.isArray(b.scope) && b.scope.length > 0
+              ? b.scope
+              : ["user:universal"],
+        }));
         finalSidecarJson = JSON.stringify(parsed);
       }
 
@@ -553,6 +575,7 @@ export function registerOnboardingRoutes(
         sidecarRaw: finalSidecarJson,
         sourceModel: `onboarding:${draft.modelId}`,
       });
+      await drafts.remove(draft_id);
 
       deps.extractionWorker
         .processById(jobId)
@@ -693,6 +716,7 @@ function handleToken() {
 
 function showProviderSetup(err) {
   set(\`
+  <img src="/assets/tenure-logo.png" alt="Tenure" class="logo">
     <div class="header">
       <h1>Connect a provider</h1>
       <p>Tenure needs an LLM to run onboarding extraction and belief injection.</p>
@@ -1035,6 +1059,7 @@ function showReview(projectScope) {
   \`).join("");
 
   set(\`
+     <img src="/assets/tenure-logo.png" alt="Tenure" class="logo">
     <div class="header">
       <h1>Review what we learned</h1>
       <p>Uncheck anything that's wrong or you don't want kept. You can edit further after setup.</p>

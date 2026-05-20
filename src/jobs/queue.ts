@@ -14,6 +14,13 @@ export interface EnqueueParams {
   scope: string[];
   sourceModel: string;
   clientCategory?: string;
+  extractionMode?: "standard" | "ide";
+  workspaceContext?: {
+    project_scope: string | null;
+    language_scope: string | null;
+    active_file: string | null;
+    active_package: string | null;
+  };
 }
 
 export interface EnqueueOnboardingParams {
@@ -64,6 +71,12 @@ export class ExtractionJobQueue {
         source_model: params.sourceModel,
         ...(params.clientCategory !== undefined && {
           client_category: params.clientCategory,
+        }),
+        ...(params.extractionMode !== undefined && {
+          extraction_mode: params.extractionMode,
+        }),
+        ...(params.workspaceContext !== undefined && {
+          workspace_context: params.workspaceContext,
         }),
       },
     };

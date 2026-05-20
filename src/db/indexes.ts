@@ -237,6 +237,14 @@ export async function ensureIndexes(cols: Collections): Promise<void> {
       name: "contradictions_pending_recent",
     },
   ]);
+
+  await cols.onboarding_drafts.createIndexes([
+    {
+      key: { created_at: 1 },
+      expireAfterSeconds: 60 * 60 * 24 * 7,
+    },
+    { key: { user_id: 1 } },
+  ]);
 }
 
 export async function ensureSearchIndexes(db: Db): Promise<void> {

@@ -290,6 +290,15 @@ function beliefCard(b) {
      </div>\`
           : ""
       }
+          \${
+        b.scope?.length
+          ? \`<div style="margin-bottom:.5rem">
+              \${b.scope.map(s =>
+                \`<span class="badge" style="background:#0d1a2a;color:#5aa8ff;margin-right:.25rem;font-family:monospace">\${esc(s)}</span>\`
+              ).join("")}
+            </div>\`
+          : ""
+      }
       <div class="bactions">
         <button class="btn btn-pin\${b.pinned ? " active" : ""}" data-action="toggle-pin" data-id="\${esc(b.id)}">\${b.pinned ? "📌 Pinned" : "📌 Pin"}</button>
         <button class="btn" data-action="open-edit" data-id="\${esc(b.id)}">Edit</button>

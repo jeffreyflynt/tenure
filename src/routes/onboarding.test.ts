@@ -1,4 +1,6 @@
 import anyTest, { type TestFn } from "ava";
+import { MongoMemoryServer } from "mongodb-memory-server";
+import { MongoClient, type Db } from "mongodb";
 import Fastify, { type FastifyInstance } from "fastify";
 import sinon from "sinon";
 import {
@@ -11,6 +13,8 @@ import type {
   NormalizedResponse,
 } from "../providers/types.js";
 import { ProviderRegistry } from "../providers/registry.js";
+import type { Collections } from "../db/collections.js";
+import { getCollections } from "../db/collections.js";
 
 interface Context {
   app: FastifyInstance;
@@ -18,11 +22,31 @@ interface Context {
   adapter: ProviderAdapter;
 }
 
-const test = anyTest as TestFn<Context>;
+const test = anyTest.serial as TestFn<Context>;
+
+let mongod: MongoMemoryServer;
+let client: MongoClient;
+let cols: Collections;
 
 const USER_ID = "user-onboarding-test";
 const MODEL = "claude-haiku-4-5-20251001";
 const PROVIDER_ID = "anthropic";
+
+test.before(async () => {
+  mongod = await MongoMemoryServer.create();
+  client = new MongoClient(mongod.getUri());
+  await client.connect();
+  cols = getCollections(client.db("test"));
+});
+
+test.after.always(async () => {
+  await client.close();
+  await mongod.stop();
+});
+
+test.beforeEach(async () => {
+  await cols.onboarding_drafts.deleteMany({});
+});
 
 function makeAdapter(
   response: Partial<NormalizedResponse> = {},
@@ -90,7 +114,7 @@ function makeDeps(
 
 function buildApp(deps: OnboardingDeps): FastifyInstance {
   const app = Fastify();
-  registerOnboardingRoutes(app, deps);
+  registerOnboardingRoutes(app, deps, cols);
   return app;
 }
 

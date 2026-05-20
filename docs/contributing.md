@@ -23,7 +23,7 @@ Tenure is early and the surface area is intentionally small. The best contributi
 ## Getting Started
 
 ```bash
-git clone https://github.com/jeffreyflynt/tenure
+git clone https://github.com/tenurehq/tenure
 cd tenure
 npm install
 cp .env.example .env   # add your provider keys

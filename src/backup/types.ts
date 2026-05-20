@@ -59,6 +59,7 @@ export interface ExportedRuntimeConfig {
   error_retention_days: number;
   strict_model_tiers: boolean;
   extraction_enabled: boolean;
+  ide_extraction_enabled?: boolean;
 }
 
 export interface ExportedPersonaDoc {

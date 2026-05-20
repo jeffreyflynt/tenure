@@ -1,0 +1,155 @@
+{
+  "name": "tenure-vscode",
+  "displayName": "Tenure",
+  "description": "Persistent AI memory that follows you across every tool, session, and interface. Fully local.",
+  "version": "1.0.14",
+  "publisher": "tenureai",
+  "license": "MIT",
+  "icon": "resources/tenure-logo-icon.png",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/tenurehq/tenure"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "AI",
+    "Other",
+    "Machine Learning"
+  ],
+  "keywords": [
+    "memory",
+    "ai",
+    "llm",
+    "cursor",
+    "windsurf",
+    "claude",
+    "claude code",
+    "persistent memory",
+    "long-term memory",
+    "context",
+    "session memory",
+    "ai memory",
+    "ai assistant",
+    "copilot",
+    "codeium",
+    "agent",
+    "rag",
+    "world model",
+    "local ai",
+    "openai"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": "limited",
+      "description": "Tenure reads workspace manifest files to resolve project scope. Scope resolution is disabled in untrusted workspaces."
+    }
+  },
+  "extensionKind": [
+    "ui"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "walkthroughs": [
+      {
+        "id": "tenure.setup",
+        "title": "Get started with Tenure",
+        "description": "Set up persistent memory for your AI coding sessions.",
+        "steps": [
+          {
+            "id": "tenure.setup.token",
+            "title": "Set your API token",
+            "description": "Paste your Tenure token to connect the extension to your local proxy.\n[Set Token](command:tenure.setToken)",
+            "completionEvents": [
+              "onContext:tenure.tokenConfigured"
+            ],
+            "media": {
+              "markdown": "media/walkthrough/token.md"
+            }
+          },
+          {
+            "id": "tenure.setup.client",
+            "title": "Point your IDE at Tenure",
+            "description": "Set your AI client's base URL to ``http://localhost:5757/v1``.\n[Copy URL](command:tenure.copyBaseUrl)",
+            "media": {
+              "markdown": "media/walkthrough/client.md"
+            }
+          },
+          {
+            "id": "tenure.setup.scope",
+            "title": "Understand project scope",
+            "description": "Tenure isolates memory by project. Add a ``.tenure`` file to override automatic detection.\n[Open Docs](command:tenure.openBeliefs)",
+            "media": {
+              "markdown": "media/walkthrough/scope.md"
+            }
+          },
+          {
+            "id": "tenure.setup.beliefs",
+            "title": "View your beliefs",
+            "description": "See everything Tenure has learned about you.\n[Open Dashboard](command:tenure.openBeliefs)",
+            "media": {
+              "markdown": "media/walkthrough/beliefs.md"
+            }
+          }
+        ]
+      }
+    ],
+    "configuration": {
+      "title": "Tenure",
+      "properties": {
+        "tenure.baseUrl": {
+          "type": "string",
+          "default": "http://localhost:5757",
+          "description": "Base URL of your local Tenure proxy."
+        },
+        "tenure.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable or disable the Tenure VS Code extension."
+        }
+      }
+    },
+    "commands": [
+      {
+        "command": "tenure.setToken",
+        "title": "Tenure: Set API Token"
+      },
+      {
+        "command": "tenure.syncNow",
+        "title": "Tenure: Sync Workspace State"
+      },
+      {
+        "command": "tenure.openBeliefs",
+        "title": "Tenure: Open Beliefs Dashboard"
+      }
+    ]
+  },
+  "extensionDependencies": [
+    "vscode.git"
+  ],
+  "scripts": {
+    "build": "tsup src/extension.ts --out-dir out --format cjs --external vscode --no-splitting",
+    "build:test": "tsup 'src/test/**/*.ts' --out-dir out/test --format cjs --external vscode --no-splitting --tsconfig tsconfig.test.json",
+    "watch": "tsc -watch -p tsconfig.json",
+    "package": "vsce package",
+    "publish": "vsce publish",
+    "test": "npm run build && npm run build:test && vscode-test"
+  },
+  "devDependencies": {
+    "@types/jest": "^30.0.0",
+    "@types/mocha": "^10.0.10",
+    "@types/node": "25.9.1",
+    "@types/vscode": "1.85.0",
+    "@typescript/native-preview": "^7.0.0-dev.20260519.1",
+    "@vscode/test-cli": "^0.0.12",
+    "@vscode/test-electron": "^2.5.2",
+    "@vscode/vsce": "3.9.1",
+    "mocha": "^11.7.5",
+    "tsup": "^8.5.1",
+    "typescript": "6.0.3"
+  }
+}

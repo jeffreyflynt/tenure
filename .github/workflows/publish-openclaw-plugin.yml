@@ -70,7 +70,7 @@ jobs:
         run: |
           VERSION="${{ github.ref_name }}"
           VERSION="${VERSION#v}"
-          npm version "$VERSION" --no-git-tag-version
+          jq --arg v "$VERSION" '.version = $v' package.json > package.tmp.json && mv package.tmp.json package.json
 
       - name: Publish to npm
         if: ${{ !inputs.dry_run }}
@@ -86,9 +86,9 @@ jobs:
       - name: Publish to ClaWHub
         if: ${{ !inputs.dry_run }}
         run: |
-          clawhub package publish "jeffreyflynt/tenure@main" \
+          clawhub package publish "tenurehq/tenure@main" \
             --clawscan-note "Injects agent-scope headers for multi-agent isolation and forwards requests to a user-run localhost Tenure proxy (port 5757). No data leaves localhost except to the user's configured Anthropic or OpenAI endpoint." \
-            --source-repo https://github.com/jeffreyflynt/tenure \
+            --source-repo https://github.com/tenurehq/tenure \
             --source-commit $(git rev-parse HEAD) \
             --version ${{ steps.version.outputs.value }} \
             --owner @tenureai \
@@ -100,9 +100,9 @@ jobs:
       - name: Dry run publish (ClaWHub)
         if: ${{ inputs.dry_run }}
         run: |
-          clawhub package publish "jeffreyflynt/tenure@main" \
+          clawhub package publish "tenurehq/tenure@main" \
             --clawscan-note "Injects agent-scope headers for multi-agent isolation and forwards requests to a user-run localhost Tenure proxy (port 5757). No data leaves localhost except to the user's configured Anthropic or OpenAI endpoint." \
-            --source-repo https://github.com/jeffreyflynt/tenure \
+            --source-repo https://github.com/tenurehq/tenure \
             --source-commit $(git rev-parse HEAD) \
             --version ${{ steps.version.outputs.value }} \
             --owner @tenureai \

@@ -20,6 +20,7 @@ import { ExtractionWorker } from "../extraction/worker.js";
 import { RuntimeConfigStore } from "../config/runtime.ts";
 import { ErrorLogger } from "../errors/logger.ts";
 import { Session } from "../types/session.ts";
+import { WorkspaceStateCache } from "../workspace/stateCache.js";
 
 const test = anyTest.serial as TestFn;
 
@@ -2540,4 +2541,363 @@ test("!extract off does not affect injectionPaused field", async (t) => {
 
   t.false((updated as any).injectionPaused);
   t.true((updated as any).extractionPaused);
+});
+
+async function buildAppWithWorkspaceState(
+  adapterOrResponse: ProviderAdapter | NormalizedResponse,
+  workspaceState?: WorkspaceStateCache,
+): Promise<{
+  app: FastifyInstance;
+  deps: ChatDeps;
+}> {
+  const adapter =
+    "id" in adapterOrResponse
+      ? (adapterOrResponse as ProviderAdapter)
+      : makeStubAdapter(adapterOrResponse as NormalizedResponse);
+
+  const registry = new ProviderRegistry();
+  registry.register(adapter);
+
+  const sessions = new SessionManager(db);
+  const history = new HistoryManager(db);
+  const context = new ContextBuilder(
+    {
+      listByScope: sinon.stub().resolves([]),
+      listPinnedOpenQuestions: sinon.stub().resolves([]),
+    } as any,
+    { get: sinon.stub().resolves(null) } as any,
+  );
+  const jobs = new ExtractionJobQueue(db);
+  const extractionWorker = {
+    processById: sinon.stub().resolves(),
+    sweep: sinon.stub().resolves(0),
+  };
+
+  const runtimeStore = {
+    load: sinon.stub().resolves({ extraction_enabled: true }),
+    set: sinon.stub().resolves(),
+  };
+
+  const deps: ChatDeps = {
+    sessions,
+    history,
+    context,
+    providers: registry,
+    jobs,
+    userId: USER_ID,
+    extractionWorker: extractionWorker as unknown as ExtractionWorker,
+    runtimeStore: runtimeStore as unknown as RuntimeConfigStore,
+    errorLogger: {
+      log: sinon.stub().resolves(),
+    } as unknown as ErrorLogger,
+    workspaceState,
+  };
+
+  const app = Fastify();
+  registerChatRoute(app, deps);
+  await app.ready();
+
+  await sessions.getOrCreate(SESSION_ID, USER_ID);
+  await sessions.update(SESSION_ID, USER_ID, {
+    providerId: PROVIDER_ID,
+    model: MODEL,
+  });
+
+  return { app, deps };
+}
+
+test("IDE turn: extraction job has extraction_mode 'ide' when x-tenure-ide header is set", async (t) => {
+  const { app } = await buildAppWithWorkspaceState(
+    makeProviderResponse("IDE reply."),
+  );
+
+  await post(
+    app,
+    { messages: [{ role: "user", content: "IDE turn test" }] },
+    { "x-tenure-ide": "1" },
+  );
+
+  const job = await waitForDoc(db.collection("jobs"), {
+    "payload.user_message": "IDE turn test",
+  });
+  t.truthy(job);
+  t.is((job as any).payload.extraction_mode, "ide");
+});
+
+test("IDE turn: extraction job has extraction_mode 'standard' when x-tenure-ide header is absent", async (t) => {
+  const { app } = await buildAppWithWorkspaceState(
+    makeProviderResponse("Standard reply."),
+  );
+
+  await post(app, {
+    messages: [{ role: "user", content: "Standard turn test" }],
+  });
+
+  const job = await waitForDoc(db.collection("jobs"), {
+    "payload.user_message": "Standard turn test",
+  });
+  t.truthy(job);
+  t.is((job as any).payload.extraction_mode, "standard");
+});
+
+test("IDE turn: workspace_context.project_scope populated from x-tenure-project header", async (t) => {
+  const { app } = await buildAppWithWorkspaceState(
+    makeProviderResponse("Project header reply."),
+  );
+
+  await post(
+    app,
+    { messages: [{ role: "user", content: "Project header flow" }] },
+    { "x-tenure-ide": "1", "x-tenure-project": "MyApp" },
+  );
+
+  const job = await waitForDoc(db.collection("jobs"), {
+    "payload.user_message": "Project header flow",
+  });
+  t.truthy(job);
+  t.is((job as any).payload.workspace_context.project_scope, "project:myapp");
+});
+
+test("IDE turn: workspace_context.project_scope populated from WorkspaceStateCache when no header", async (t) => {
+  const wsCache = new WorkspaceStateCache(db);
+  await wsCache.set(USER_ID, {
+    workspace_root: "/dev/tenure",
+    project_name: "Tenure App",
+    active_package: null,
+    git_remote: null,
+    active_file: null,
+    active_language: "typescript",
+    updated_at: new Date(),
+  });
+
+  const { app } = await buildAppWithWorkspaceState(
+    makeProviderResponse("Cache reply."),
+    wsCache,
+  );
+
+  await post(
+    app,
+    { messages: [{ role: "user", content: "Cache scope flow" }] },
+    { "x-tenure-ide": "1" },
+  );
+
+  const job = await waitForDoc(db.collection("jobs"), {
+    "payload.user_message": "Cache scope flow",
+  });
+  t.truthy(job);
+  t.is(
+    (job as any).payload.workspace_context.project_scope,
+    "project:tenure-app",
+  );
+});
+
+test("IDE turn: workspace_context.active_package populated from WorkspaceStateCache", async (t) => {
+  const wsCache = new WorkspaceStateCache(db);
+  await wsCache.set(USER_ID, {
+    workspace_root: "/dev/monorepo",
+    project_name: "monorepo",
+    active_package: "@tenure/core",
+    git_remote: null,
+    active_file: "/dev/monorepo/packages/core/src/index.ts",
+    active_language: "typescript",
+    updated_at: new Date(),
+  });
+
+  const { app } = await buildAppWithWorkspaceState(
+    makeProviderResponse("Package reply."),
+    wsCache,
+  );
+
+  await post(
+    app,
+    { messages: [{ role: "user", content: "Package flow" }] },
+    { "x-tenure-ide": "1" },
+  );
+
+  const job = await waitForDoc(db.collection("jobs"), {
+    "payload.user_message": "Package flow",
+  });
+  t.truthy(job);
+  t.is((job as any).payload.workspace_context.active_package, "@tenure/core");
+});
+
+test("IDE turn: workspace_context is absent from job when not an IDE turn", async (t) => {
+  const wsCache = new WorkspaceStateCache(db);
+  await wsCache.set(USER_ID, {
+    workspace_root: "/dev/project",
+    project_name: "project",
+    active_package: "@scope/pkg",
+    git_remote: null,
+    active_file: null,
+    active_language: "typescript",
+    updated_at: new Date(),
+  });
+
+  const { app } = await buildAppWithWorkspaceState(
+    makeProviderResponse("Non-IDE reply."),
+    wsCache,
+  );
+
+  await post(app, {
+    messages: [{ role: "user", content: "Non-IDE turn" }],
+  });
+
+  const job = await waitForDoc(db.collection("jobs"), {
+    "payload.user_message": "Non-IDE turn",
+  });
+  t.truthy(job);
+  t.is((job as any).payload.workspace_context, undefined);
+});
+
+test("IDE turn: x-tenure-project header is slugified in workspace_context", async (t) => {
+  const { app } = await buildAppWithWorkspaceState(
+    makeProviderResponse("Slugified."),
+  );
+
+  await post(
+    app,
+    { messages: [{ role: "user", content: "Slugify test" }] },
+    { "x-tenure-ide": "1", "x-tenure-project": "My Cool App!" },
+  );
+
+  const job = await waitForDoc(db.collection("jobs"), {
+    "payload.user_message": "Slugify test",
+  });
+  t.truthy(job);
+  t.is(
+    (job as any).payload.workspace_context.project_scope,
+    "project:my-cool-app",
+  );
+});
+
+test("IDE turn: no workspace_context when neither header nor cache provides project scope", async (t) => {
+  const { app } = await buildAppWithWorkspaceState(
+    makeProviderResponse("No context."),
+  );
+
+  await post(
+    app,
+    { messages: [{ role: "user", content: "No workspace context" }] },
+    { "x-tenure-ide": "1" },
+  );
+
+  const job = await waitForDoc(db.collection("jobs"), {
+    "payload.user_message": "No workspace context",
+  });
+  t.truthy(job);
+  t.is((job as any).payload.workspace_context, undefined);
+});
+
+test("IDE turn: extraction is suppressed when ide_extraction_enabled is false", async (t) => {
+  const wsCache = new WorkspaceStateCache(db);
+  await wsCache.set(USER_ID, {
+    workspace_root: "/dev",
+    project_name: "test",
+    active_package: null,
+    git_remote: null,
+    active_file: null,
+    active_language: "typescript",
+    updated_at: new Date(),
+  });
+
+  const adapter = makeStubAdapter(makeProviderResponse("No extract."));
+  const registry = new ProviderRegistry();
+  registry.register(adapter);
+
+  const sessions = new SessionManager(db);
+  const history = new HistoryManager(db);
+  const jobs = new ExtractionJobQueue(db);
+  const extractionWorker = {
+    processById: sinon.stub().resolves(),
+    sweep: sinon.stub().resolves(0),
+  };
+
+  const deps: ChatDeps = {
+    sessions,
+    history,
+    context: new ContextBuilder(
+      {
+        listByScope: sinon.stub().resolves([]),
+        listPinnedOpenQuestions: sinon.stub().resolves([]),
+      } as any,
+      { get: sinon.stub().resolves(null) } as any,
+    ),
+    providers: registry,
+    jobs,
+    userId: USER_ID,
+    extractionWorker: extractionWorker as unknown as ExtractionWorker,
+    runtimeStore: {
+      load: sinon.stub().resolves({
+        extraction_enabled: true,
+        ide_extraction_enabled: false,
+      }),
+      set: sinon.stub().resolves(),
+    } as unknown as RuntimeConfigStore,
+    errorLogger: {
+      log: sinon.stub().resolves(),
+    } as unknown as ErrorLogger,
+    workspaceState: wsCache,
+  };
+
+  const app = Fastify();
+  registerChatRoute(app, deps);
+  await app.ready();
+
+  await sessions.getOrCreate(SESSION_ID, USER_ID);
+  await sessions.update(SESSION_ID, USER_ID, {
+    providerId: PROVIDER_ID,
+    model: MODEL,
+  });
+
+  await post(
+    app,
+    { messages: [{ role: "user", content: "IDE no extract" }] },
+    { "x-tenure-ide": "1" },
+  );
+
+  await new Promise((r) => setTimeout(r, 150));
+
+  t.false(extractionWorker.processById.called);
+  const job = await db.collection("jobs").findOne({
+    "payload.user_message": "IDE no extract",
+  });
+  t.is(job, null);
+});
+
+test("IDE turn: streaming also sets extraction_mode ide on job", async (t) => {
+  const events = streamEvents(["Streamed IDE."]);
+  const wsCache = new WorkspaceStateCache(db);
+  await wsCache.set(USER_ID, {
+    workspace_root: "/dev/stream-test",
+    project_name: "stream-project",
+    active_package: null,
+    git_remote: null,
+    active_file: null,
+    active_language: "typescript",
+    updated_at: new Date(),
+  });
+
+  const { app } = await buildAppWithWorkspaceState(
+    makeStreamAdapter(events),
+    wsCache,
+  );
+
+  await post(
+    app,
+    {
+      stream: true,
+      messages: [{ role: "user", content: "Stream IDE turn" }],
+    },
+    { "x-tenure-ide": "1" },
+  );
+
+  const job = await waitForDoc(db.collection("jobs"), {
+    "payload.user_message": "Stream IDE turn",
+  });
+  t.truthy(job);
+  t.is((job as any).payload.extraction_mode, "ide");
+  t.is(
+    (job as any).payload.workspace_context.project_scope,
+    "project:stream-project",
+  );
 });

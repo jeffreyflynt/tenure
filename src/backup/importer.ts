@@ -117,6 +117,7 @@ export class BackupImporter {
         "error_retention_days",
         "strict_model_tiers",
         "extraction_enabled",
+        "ide_extraction_enabled",
       ];
 
       for (const key of configKeys) {

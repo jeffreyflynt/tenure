@@ -62,6 +62,7 @@ export class BackupExporter {
         error_retention_days: runtimeConfig.error_retention_days,
         strict_model_tiers: runtimeConfig.strict_model_tiers,
         extraction_enabled: runtimeConfig.extraction_enabled,
+        ide_extraction_enabled: runtimeConfig.ide_extraction_enabled,
       },
       persona_cache: personaDoc ? this.serializePersona(personaDoc) : null,
       compaction_log: compactionLog.map((entry) => ({

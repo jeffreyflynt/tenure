@@ -14,6 +14,13 @@ export interface ExtractionJobPayload {
   source_model: string;
   source_label?: string;
   client_category?: string;
+  extraction_mode?: "standard" | "ide";
+  workspace_context?: {
+    project_scope: string | null;
+    language_scope: string | null;
+    active_file: string | null;
+    active_package: string | null;
+  };
 }
 
 export interface ExtractionJob {

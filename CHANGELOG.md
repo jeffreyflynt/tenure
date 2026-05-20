@@ -6,6 +6,37 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.0.14] - 2026-05-19
+
+### Added
+
+- **VS Code extension** (`integrations/vscode`): New native extension that syncs workspace context to the Tenure proxy on every file switch. Includes manifest-based project resolution (supports `package.json`, `Cargo.toml`, `go.mod`, `pyproject.toml`, `pom.xml`, `.sln`, and others), git remote fallback, a `.tenure` config override, a status-bar indicator, and secure token storage. Ships with full test coverage (`packageResolver`, `tenureConfig`, `workspaceSync` suites).
+- **Workspace state cache** (`src/workspace/stateCache.ts`): MongoDB-backed store for IDE-pushed workspace state (project name, active package, active file, language, git remote).
+- **IDE scope resolver** (`src/workspace/scopeResolver.ts`): Derives project and language scope from cached workspace state or system-prompt heuristics. Tested against MongoDB Memory Server.
+- **IDE extraction mode** (`src/extraction/worker.ts`, `src/jobs/queue.ts`, `src/types/job.ts`): Extraction jobs now carry an `extraction_mode` (`"standard"` | `"ide"`) and a `workspace_context` block. IDE-mode extractions enforce project scope and inject active-package aliases automatically.
+- **IDE sidecar prompt** (`src/sidecar/idePrompt.ts`): Dedicated sidecar instruction builder for IDE turns, separate from the standard chat path.
+- **Workspace route** (`src/routes/workspace.ts`): New endpoint for the VS Code extension to push workspace state.
+- **`onboarding_drafts` collection** (`src/db/collections.ts`, `src/db/indexes.ts`): Persists onboarding draft state with a 7-day TTL and per-user index.
+- **`ide_extraction_enabled` runtime config flag**: Toggles IDE-specific extraction; included in backup export/import.
+- **`provenance_hint` on extraction signals** (`src/extraction/types.ts`): Accepts `"demonstrated"` or `"config_artifact"` to tag the origin of a belief.
+- **Demonstrated-belief promotion logic** (`src/extraction/merger.ts`): Beliefs tagged as demonstrated or config-derived are promoted after 3 occurrences within a 24-hour window.
+- **Scope badges on the Beliefs UI** (`src/routes/beliefs-ui.ts`): Scope tags now render as colored inline badges.
+- **Richer error cards in Admin UI** (`src/routes/admin-ui.ts`): Error log entries now display provider, model, session ID, and turn ID alongside severity, stage, and timestamp.
+- **Docs**: New `docs/clients/openclaw.md` and `docs/clients/vscode.md` client guides; `docs/clients.md` expanded into a structured chat/IDE/agent table with Docker networking notes.
+
+### Changed
+
+- **README rewritten**: Condensed and reorganized around concrete failure scenarios ("old decisions resurface," "ruled-out approaches keep coming back"), with a shorter quick-start and a "Private by design" section.
+- **GitHub org renamed** (`jeffreyflynt` → `tenurehq`): All repository URLs, publish workflow references, and `package.json` fields updated.
+- **Publish workflow**: `npm version` replaced with a direct `jq` edit to avoid git tag side-effects.
+- **`x-tenure-ide` header detection** (`src/routes/chat.ts`): Chat route reads this header to switch into IDE mode and route to the IDE sidecar prompt.
+- **Anthropic provider `max_tokens` cap raised** (`src/providers/anthropic.ts`): Now defaults to 120,000 if not specified by the caller.
+- **Beliefs route `max_tokens` raised** to 8,000; compaction runner `max_tokens` raised to 5,000.
+- **Admin error log projection** (`src/routes/admin.ts`): Now includes `turn_id`, `passthrough_succeeded`, `exception_type`, and `stack_trace` fields.
+- **`.gitignore`**: Added `.vscode-test` and `.vscode` entries.
+
+---
+
 ## [1.0.13] - 2026-05-19
 
 ### Added

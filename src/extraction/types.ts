@@ -33,6 +33,7 @@ export interface NewBelief {
   resolves_open_question: string | null;
   expertise_domain?: string;
   expertise_depth?: "learning" | "working" | "deep" | "expert";
+  provenance_hint?: "demonstrated" | "config_artifact" | null;
 }
 
 export interface BeliefUpdateSignal {
@@ -123,6 +124,9 @@ function parseNewBelief(d: Record<string, unknown>): NewBelief {
         | "working"
         | "deep"
         | "expert",
+    }),
+    ...(d.provenance_hint !== undefined && {
+      provenance_hint: d.provenance_hint as "demonstrated" | "config_artifact",
     }),
   };
 }

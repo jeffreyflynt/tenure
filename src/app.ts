@@ -26,6 +26,7 @@ import {
 import { getBeliefMasterKeyPath } from "./config/beliefEncryptionMasterKey.js";
 import { initBeliefEncryption } from "./config/beliefEncryption.js";
 import { randomBytes } from "node:crypto";
+import { WorkspaceStateCache } from "./workspace/stateCache.js";
 
 async function verifyEncryptionActive(
   db: Db,
@@ -126,6 +127,7 @@ export async function buildApp(config: BootstrapConfig) {
   const runtimeStore = new RuntimeConfigStore(cols, vault);
   const runtimeConfig = await runtimeStore.load();
   const errorLogger = new ErrorLogger(cols);
+  const workspaceState = new WorkspaceStateCache(db);
 
   const providers = new ProviderRegistry();
   if (runtimeConfig.openai_api_key) {
@@ -188,6 +190,7 @@ export async function buildApp(config: BootstrapConfig) {
     compactionRunner,
     extractionWorker,
     personaSummary,
+    workspaceState,
   });
 
   return {
