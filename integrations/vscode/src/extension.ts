@@ -7,8 +7,6 @@ import path from "node:path";
 export async function activate(
   context: vscode.ExtensionContext,
 ): Promise<void> {
-  if (!vscode.workspace.workspaceFolders?.length) return;
-
   const tokenStore = new TokenStore(context.secrets);
 
   const existingToken = await tokenStore.get();
@@ -18,8 +16,50 @@ export async function activate(
     existingToken !== undefined,
   );
 
+  context.subscriptions.push(
+    vscode.commands.registerCommand("tenure.setToken", async () => {
+      const token = await vscode.window.showInputBox({
+        prompt: "Paste your Tenure API token",
+        password: true,
+        ignoreFocusOut: true,
+        placeHolder: "mp_...",
+      });
+      if (token?.trim()) {
+        await tokenStore.set(token.trim());
+        await vscode.commands.executeCommand(
+          "setContext",
+          "tenure.tokenConfigured",
+          true,
+        );
+        vscode.window.showInformationMessage("Tenure: token saved.");
+        sync?.scheduleSync();
+      }
+    }),
+
+    vscode.commands.registerCommand("tenure.openBeliefs", () => {
+      const cfg = vscode.workspace.getConfiguration("tenure");
+      const baseUrl = cfg.get<string>("baseUrl", "http://localhost:5757");
+      vscode.env.openExternal(vscode.Uri.parse(`${baseUrl}/beliefs`));
+    }),
+  );
+
   if (!existingToken) {
     await maybeShowTokenWarning(context);
+  }
+
+  if (!vscode.workspace.workspaceFolders?.length) {
+    const noWorkspaceProvider = new TenureBeliefsViewProvider(
+      tokenStore,
+      context.extensionUri,
+    );
+    noWorkspaceProvider.setNoWorkspace(true);
+    context.subscriptions.push(
+      vscode.window.registerWebviewViewProvider(
+        "tenure.beliefsView",
+        noWorkspaceProvider,
+      ),
+    );
+    return;
   }
 
   const statusBar = vscode.window.createStatusBarItem(
@@ -70,29 +110,9 @@ export async function activate(
       beliefsProvider,
     ),
 
-    vscode.commands.registerCommand("tenure.setToken", async () => {
-      const token = await vscode.window.showInputBox({
-        prompt: "Paste your Tenure API token",
-        password: true,
-        ignoreFocusOut: true,
-        placeHolder: "mp_...",
-      });
-      if (token?.trim()) {
-        await tokenStore.set(token.trim());
-        vscode.window.showInformationMessage("Tenure: token saved.");
-        sync.scheduleSync();
-      }
-    }),
-
     vscode.commands.registerCommand("tenure.syncNow", () => {
       sync.scheduleSync();
       vscode.window.showInformationMessage("Tenure: workspace sync triggered.");
-    }),
-
-    vscode.commands.registerCommand("tenure.openBeliefs", () => {
-      const cfg = vscode.workspace.getConfiguration("tenure");
-      const baseUrl = cfg.get<string>("baseUrl", "http://localhost:5757");
-      vscode.env.openExternal(vscode.Uri.parse(`${baseUrl}/beliefs`));
     }),
 
     vscode.commands.registerCommand("tenure.recordBelief", async () => {
@@ -151,6 +171,7 @@ export async function activate(
         }
       }
     }),
+
     vscode.workspace.onDidChangeWorkspaceFolders(() => sync.scheduleSync()),
 
     vscode.workspace.onDidChangeConfiguration((event) => {

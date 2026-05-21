@@ -93,6 +93,8 @@ export class TenureBeliefsViewProvider implements vscode.WebviewViewProvider {
     | Parameters<TenureBeliefsViewProvider["sendWorkspaceState"]>[0]
     | null = null;
 
+  private noWorkspace = false;
+
   constructor(
     private readonly tokenStore: TokenStore,
     private readonly extensionUri: vscode.Uri,
@@ -120,7 +122,11 @@ export class TenureBeliefsViewProvider implements vscode.WebviewViewProvider {
         this.togglePin(msg.id, msg.pinned);
       }
       if (msg.command === "ready") {
-        this.pushState();
+        if (this.noWorkspace) {
+          this.showNoWorkspace();
+        } else {
+          this.pushState();
+        }
       }
       if (msg.command === "recordBelief") {
         const scope = this.currentScope
@@ -219,6 +225,21 @@ export class TenureBeliefsViewProvider implements vscode.WebviewViewProvider {
     this.send({ type: "file_meta", path, size_bytes: sizeBytes });
   }
 
+  setNoWorkspace(value: boolean): void {
+    this.noWorkspace = value;
+    if (value) {
+      this.showNoWorkspace();
+    }
+  }
+
+  showNoWorkspace(): void {
+    this.view?.webview.postMessage({ type: "no_workspace" });
+  }
+
+  showDisconnected(): void {
+    this.view?.webview.postMessage({ type: "disconnected" });
+  }
+
   sendFetchFileBeliefs(
     filePath: string,
     scope: string,
@@ -287,7 +308,12 @@ export class TenureBeliefsViewProvider implements vscode.WebviewViewProvider {
 
     socket.on("close", () => {
       if (this.socket === socket) this.socket = null;
-      if (!this.disposed) this.scheduleReconnect();
+      if (!this.disposed) {
+        if (!this.currentScope) {
+          this.showDisconnected();
+        }
+        this.scheduleReconnect();
+      }
     });
 
     socket.on("error", () => {});
@@ -589,10 +615,24 @@ export class TenureBeliefsViewProvider implements vscode.WebviewViewProvider {
       closeForm();
     }
 
+    function renderEmpty(label, line1, line2) {
+      document.getElementById("scope-label").textContent = label;
+      document.getElementById("beliefs-list").innerHTML =
+        '<div class="empty">' + line1 +
+        (line2 ? '<br><span style="font-size:10px;opacity:0.7;">' + line2 + '</span>' : '') +
+        '</div>';
+    }
+
     window.addEventListener("message", ({ data }) => {
       switch (data.type) {
         case "state":
           renderBeliefs(data.scope, data.beliefs);
+          break;
+        case "no_workspace":
+          renderEmpty("No workspace open", "Open a folder to start", "Tenure tracks beliefs per project");
+          break;
+        case "disconnected":
+          renderEmpty("Not connected", "Tenure proxy is unreachable", "Check that your local proxy is running");
           break;
         case "error":
           console.warn("[Tenure WS] server error on " + data.request_type + ": " + data.message);
