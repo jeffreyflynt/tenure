@@ -29,7 +29,6 @@ function makeState(overrides: Partial<WorkspaceState> = {}): WorkspaceState {
   return {
     workspace_root: "/home/dev/project",
     project_name: "my-project",
-    active_package: null,
     git_remote: "git@github.com:user/my-project.git",
     active_file: "/home/dev/project/src/index.ts",
     active_language: "typescript",
@@ -77,14 +76,6 @@ test.serial("set upserts on repeated calls for the same user", async (t) => {
 
   const doc = await db.collection("workspace_state").findOne({ _id: USER_ID });
   t.is(doc!.project_name, "second");
-});
-
-test.serial("set stores active_package when provided", async (t) => {
-  const cache = new WorkspaceStateCache(db);
-  await cache.set(USER_ID, makeState({ active_package: "@scope/my-lib" }));
-
-  const retrieved = cache.get(USER_ID);
-  t.is(retrieved!.active_package, "@scope/my-lib");
 });
 
 test.serial(
@@ -138,27 +129,6 @@ test.serial("load populates in-memory cache after DB read", async (t) => {
   t.truthy(fromMemory);
   t.is(fromMemory!.project_name, "test");
 });
-
-test.serial(
-  "load handles null active_package from DB gracefully",
-  async (t) => {
-    await db.collection("workspace_state").insertOne({
-      _id: "user-no-pkg" as any,
-      user_id: "user-no-pkg",
-      workspace_root: "/dev",
-      project_name: "test",
-      git_remote: null,
-      active_file: null,
-      active_language: null,
-      updated_at: new Date(),
-    });
-
-    const cache = new WorkspaceStateCache(db);
-    const loaded = await cache.load("user-no-pkg");
-    t.truthy(loaded);
-    t.is(loaded!.active_package, null);
-  },
-);
 
 test.serial("resolveProjectScope returns null when user has no state", (t) => {
   const cache = new WorkspaceStateCache(db);

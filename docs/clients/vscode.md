@@ -4,6 +4,8 @@ The Tenure VS Code extension syncs your workspace context to the Tenure proxy on
 
 The extension works with any AI client inside VS Code that you can point at a custom base URL: Cline, Continue, Windsurf, Cursor, and others. See the individual client pages for client-specific setup.
 
+> **This extension requires Tenure to be running locally.** It has no standalone value without it. See the [quickstart](../quickstart.md) to get Tenure running before installing this extension.
+
 ## Requirements
 
 - Tenure running locally. See [quickstart.md](../quickstart.md) if you haven't installed it yet.
@@ -42,29 +44,24 @@ http://localhost:5757/v1
 
 The extension handles scope -- your AI client just needs to route through Tenure. See the individual client pages for where to set the base URL in each tool.
 
-## How scope resolution works
+## Project scope
 
-On every file switch, the extension walks up from your active file looking for the nearest project manifest and sends the resolved project name to Tenure. Manifests checked, in order:
+Tenure resolves your project name from a `.tenure` file at your workspace root.
+Create one with just your project name:
 
-| Language                | File                         |
-| ----------------------- | ---------------------------- |
-| JavaScript / TypeScript | `package.json`               |
-| Rust                    | `Cargo.toml`                 |
-| Go                      | `go.mod`                     |
-| Python                  | `pyproject.toml`, `setup.py` |
-| Java / Kotlin           | `pom.xml`, `settings.gradle` |
-| .NET                    | `.sln`, `.csproj`            |
+f no .tenure file exists, Tenure falls back to your git remote name, then
+a stable slug derived from your workspace folder name. Scope resolution never
+fails silently.
 
-In a monorepo, this means scope follows your active file. If you switch from `packages/auth/src/login.ts` to `packages/proxy/src/index.ts`, Tenure switches project scope with you. Beliefs stay attributed to the right package.
-
-If no manifest is found, the extension falls back to the git remote name, then a stable slug derived from your workspace folder name. Scope resolution never fails silently.
+Run `Tenure: Create .tenure File` from the command palette to scaffold one
+automatically using the name Tenure has already resolved for your project.
 
 ## Overriding scope manually
 
 If the automatic resolution picks up the wrong project name, you can override it with a `.tenure` file in your workspace root:
 
-```json
-{ "projectId": "my-project" }
+```
+my-project
 ```
 
 This takes priority over all manifest-based resolution.
@@ -90,11 +87,14 @@ Clicking the status bar item when synced opens your Beliefs Dashboard at `http:/
 
 ## Commands
 
-| Command                          | Description                                   |
-| -------------------------------- | --------------------------------------------- |
-| `Tenure: Set API Token`          | Store your Tenure bearer token                |
-| `Tenure: Sync Workspace State`   | Trigger a manual sync                         |
-| `Tenure: Open Beliefs Dashboard` | Open `localhost:5757/beliefs` in your browser |
+| Command                                | Description                                       |
+| -------------------------------------- | ------------------------------------------------- |
+| `Tenure: Set API Token`                | Store your Tenure bearer token                    |
+| `Tenure: Sync Workspace State`         | Trigger a manual sync                             |
+| `Tenure: Open Beliefs Dashboard`       | Open `localhost:5757/beliefs` in your browser     |
+| `Tenure: Record Project Belief`        | Record a belief directly from the command palette |
+| `Tenure: Record Belief from Selection` | Record a belief from selected code                |
+| `Tenure: Create .tenure File`          | Scaffold a .tenure file with your resolved name   |
 
 ## Settings
 
@@ -113,7 +113,9 @@ If Tenure is running in Docker and your VS Code is on the host machine, the defa
 Run **Tenure: Sync Workspace State** from the command palette to force a sync.
 
 **Project name is wrong**
-Check which manifest file is nearest to your active file. If the resolved name isn't what you want, add a `.tenure` file to your workspace root with the correct `projectId`.
+Add a `.tenure` file to your workspace root containing your project name,
+or run **Tenure: Create .tenure File** to scaffold one automatically.
+The file takes priority over all other resolution methods.
 
 **Extension isn't activating**
 The extension requires a workspace folder to be open. It will not activate in single-file mode or when no folder is loaded.

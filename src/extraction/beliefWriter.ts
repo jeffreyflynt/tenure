@@ -7,6 +7,7 @@ import type {
   ChangeLogEntry,
   EpistemicStatus,
   ExpertiseDepth,
+  OriginContext,
 } from "../types/belief.js";
 
 export class CanonicalNameConflictError extends Error {
@@ -44,6 +45,7 @@ export interface CreateBeliefInput {
   expertise_domain?: string;
   expertise_depth?: ExpertiseDepth;
   expertise_evidence_count?: number;
+  origin_context?: OriginContext | null;
 }
 
 export class BeliefWriter {
@@ -85,6 +87,7 @@ export class BeliefWriter {
       ...(input.expertise_evidence_count !== undefined && {
         expertise_evidence_count: input.expertise_evidence_count,
       }),
+      ...(input.origin_context && { origin_context: input.origin_context }),
     };
 
     try {

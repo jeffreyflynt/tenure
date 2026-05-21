@@ -150,11 +150,6 @@ export class ExtractionWorker implements ExtractionWorkerLike {
         ? enforceIdeScope(result, payload.workspace_context.project_scope)
         : result;
 
-    const activePackage = job.payload.workspace_context?.active_package ?? null;
-    const enriched = activePackage
-      ? injectPackageAlias(enforced, activePackage)
-      : enforced;
-
     if (skippedBeliefs.length > 0) {
       await this.jobs.updateOne(
         { _id: job._id },
@@ -162,7 +157,7 @@ export class ExtractionWorker implements ExtractionWorkerLike {
       );
     }
 
-    return this.merge(job, enriched);
+    return this.merge(job, enforced);
   }
 
   private async extractOnboarding(job: ExtractionJob): Promise<string[]> {
@@ -219,6 +214,8 @@ export class ExtractionWorker implements ExtractionWorkerLike {
     job: ExtractionJob,
     result: ExtractionResult,
   ): Promise<string[]> {
+    const wc = job.payload.workspace_context;
+
     const report = await this.merger.merge({
       userId: job.user_id,
       sessionId: job.session_id,
@@ -226,6 +223,13 @@ export class ExtractionWorker implements ExtractionWorkerLike {
       sourceModel: job.payload?.source_model ?? "unknown",
       agentId: (job as any).agent_id ?? null,
       result,
+      originContext: wc
+        ? {
+            active_file: wc.active_file,
+            language: wc.language_scope,
+            project_scope: wc.project_scope,
+          }
+        : null,
     });
 
     if (report.styleSignalsDeferred.length > 0) {
@@ -316,32 +320,6 @@ function checkContradictions(result: ExtractionResult): ExtractionResult {
     new_beliefs: result.new_beliefs.filter(
       (nb) => !conflicts.has(nb.canonical_name.trim().toLowerCase()),
     ),
-  };
-}
-
-function injectPackageAlias(
-  result: ExtractionResult,
-  activePackage: string,
-): ExtractionResult {
-  const slug = activePackage
-    .toLowerCase()
-    .replace(/^@[^/]+\//, "")
-    .replace(/[^a-z0-9-]/g, "-")
-    .replace(/-+/g, "-")
-    .replace(/^-|-$/g, "");
-
-  if (!slug) return result;
-
-  return {
-    ...result,
-    new_beliefs: result.new_beliefs.map((nb) => {
-      const hasProjectScope = nb.scope.some((s) => s.startsWith("project:"));
-      if (!hasProjectScope) return nb;
-
-      if (nb.aliases.includes(slug)) return nb;
-
-      return { ...nb, aliases: [...nb.aliases, slug] };
-    }),
   };
 }
 

@@ -59,4 +59,14 @@ export interface Belief {
   expertise_domain?: string;
   expertise_depth?: ExpertiseDepth;
   expertise_evidence_count?: number;
+  origin_context?: OriginContext | null;
+}
+
+export interface OriginContext {
+  /** File open when the belief was born */
+  active_file: string | null;
+  /** Language of the active editor at birth */
+  language: string | null;
+  /** Resolved project scope at birth */
+  project_scope: string | null;
 }

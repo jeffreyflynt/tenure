@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { Collection, Filter } from "mongodb";
-import type { Belief, ExpertiseDepth } from "../types/belief.js";
+import type { Belief, ExpertiseDepth, OriginContext } from "../types/belief.js";
 import type { ProviderAdapter } from "../providers/types.js";
 import type { PersonaCache } from "../context/personaCache.js";
 
@@ -188,6 +188,7 @@ export interface BeliefContradiction {
   status: "pending" | "resolved";
   detected_at: Date;
   resolved_at: Date | null;
+  belief_origins?: [OriginContext | null, OriginContext | null];
 }
 
 export interface CompactionLogEntry {
@@ -378,14 +379,11 @@ export class BeliefCompactionRunner {
     beliefType: string,
   ): Promise<void> {
     const { merges, contradictions } = await this.callDedupLLM(
-      beliefs,
+      beliefs.filter((b) => !b.origin_context?.active_file),
       config.prompt,
     );
-    await this.logRun(userId, scope, beliefType, merges.length);
 
-    if (config.invalidatesPersona && scope === "user:universal") {
-      await this.personaCache.invalidate(userId);
-    }
+    await this.logRun(userId, scope, beliefType, merges.length);
 
     if (merges.length > 0) {
       await this.applyDedupMerges(userId, merges);
@@ -394,8 +392,11 @@ export class BeliefCompactionRunner {
     if (contradictions.length > 0) {
       await this.persistContradictions(userId, scope, agentId, contradictions);
     }
-  }
 
+    if (config.invalidatesPersona && scope === "user:universal") {
+      await this.personaCache.invalidate(userId);
+    }
+  }
   private async callDedupLLM(
     beliefs: Belief[],
     prompt: string,
@@ -531,7 +532,11 @@ export class BeliefCompactionRunner {
         change_log: [
           {
             changed_at: now,
-            trigger: `compaction: merged from ${allIds.join(", ")}${promotedStatus === "active" && allInferred ? "; promoted from inferred via combined reinforcement" : ""}`,
+            trigger: `compaction: merged from ${allIds.join(", ")}${
+              promotedStatus === "active" && allInferred
+                ? "; promoted from inferred via combined reinforcement"
+                : ""
+            }`,
             changed_by_session: null,
             changed_by_turn: null,
           },

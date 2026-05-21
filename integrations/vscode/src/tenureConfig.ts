@@ -1,27 +1,15 @@
 import * as vscode from "vscode";
 
-export interface TenureProjectConfig {
-  projectId?: string;
-}
-
 export async function readTenureConfig(
   workspaceRootUri: vscode.Uri,
-): Promise<TenureProjectConfig | null> {
-  const candidates = [
-    vscode.Uri.joinPath(workspaceRootUri, ".tenure"),
-    vscode.Uri.joinPath(workspaceRootUri, ".tenure", "config.json"),
-  ];
+): Promise<{ projectId: string } | null> {
+  const fileUri = vscode.Uri.joinPath(workspaceRootUri, ".tenure");
+  try {
+    const rawContent = await vscode.workspace.fs.readFile(fileUri);
+    const text = new TextDecoder().decode(rawContent).trim();
 
-  for (const candidate of candidates) {
-    try {
-      const rawContent = await vscode.workspace.fs.readFile(candidate);
-      return JSON.parse(
-        new TextDecoder().decode(rawContent),
-      ) as TenureProjectConfig;
-    } catch {
-      // file missing or malformed, try next
-    }
+    return text ? { projectId: text } : null;
+  } catch {
+    return null;
   }
-
-  return null;
 }

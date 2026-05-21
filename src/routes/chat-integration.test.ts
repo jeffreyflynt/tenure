@@ -2663,7 +2663,6 @@ test("IDE turn: workspace_context.project_scope populated from WorkspaceStateCac
   await wsCache.set(USER_ID, {
     workspace_root: "/dev/tenure",
     project_name: "Tenure App",
-    active_package: null,
     git_remote: null,
     active_file: null,
     active_language: "typescript",
@@ -2691,42 +2690,11 @@ test("IDE turn: workspace_context.project_scope populated from WorkspaceStateCac
   );
 });
 
-test("IDE turn: workspace_context.active_package populated from WorkspaceStateCache", async (t) => {
-  const wsCache = new WorkspaceStateCache(db);
-  await wsCache.set(USER_ID, {
-    workspace_root: "/dev/monorepo",
-    project_name: "monorepo",
-    active_package: "@tenure/core",
-    git_remote: null,
-    active_file: "/dev/monorepo/packages/core/src/index.ts",
-    active_language: "typescript",
-    updated_at: new Date(),
-  });
-
-  const { app } = await buildAppWithWorkspaceState(
-    makeProviderResponse("Package reply."),
-    wsCache,
-  );
-
-  await post(
-    app,
-    { messages: [{ role: "user", content: "Package flow" }] },
-    { "x-tenure-ide": "1" },
-  );
-
-  const job = await waitForDoc(db.collection("jobs"), {
-    "payload.user_message": "Package flow",
-  });
-  t.truthy(job);
-  t.is((job as any).payload.workspace_context.active_package, "@tenure/core");
-});
-
 test("IDE turn: workspace_context is absent from job when not an IDE turn", async (t) => {
   const wsCache = new WorkspaceStateCache(db);
   await wsCache.set(USER_ID, {
     workspace_root: "/dev/project",
     project_name: "project",
-    active_package: "@scope/pkg",
     git_remote: null,
     active_file: null,
     active_language: "typescript",
@@ -2793,7 +2761,6 @@ test("IDE turn: extraction is suppressed when ide_extraction_enabled is false", 
   await wsCache.set(USER_ID, {
     workspace_root: "/dev",
     project_name: "test",
-    active_package: null,
     git_remote: null,
     active_file: null,
     active_language: "typescript",
@@ -2870,7 +2837,6 @@ test("IDE turn: streaming also sets extraction_mode ide on job", async (t) => {
   await wsCache.set(USER_ID, {
     workspace_root: "/dev/stream-test",
     project_name: "stream-project",
-    active_package: null,
     git_remote: null,
     active_file: null,
     active_language: "typescript",

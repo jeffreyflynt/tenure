@@ -36,6 +36,9 @@ import {
   registerWorkspaceRoutes,
   type WorkspaceDeps,
 } from "./routes/workspace.js";
+import fastifyWebsocket from "@fastify/websocket";
+import { registerBeliefsWsRoute } from "./routes/beliefs-ws.js";
+import { startBeliefChangeStream } from "./db/beliefChangeStream.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -102,10 +105,10 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
         stage: req.url.startsWith("/v1/chat")
           ? "provider_call"
           : req.url.startsWith("/admin")
-            ? "config"
-            : req.url.startsWith("/v1/beliefs")
-              ? "belief_write"
-              : "provider_call",
+          ? "config"
+          : req.url.startsWith("/v1/beliefs")
+          ? "belief_write"
+          : "provider_call",
         message: fastifyError.message,
         error: error instanceof Error ? error : new Error(fastifyError.message),
         user_id: deps.userId,
@@ -217,6 +220,16 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
   };
   registerWorkspaceRoutes(app, workspaceDeps);
 
+  await app.register(fastifyWebsocket);
+
+  registerBeliefsWsRoute(app, {
+    beliefs: deps.cols.beliefs,
+    fileMeta: deps.cols.file_meta,
+    userId: deps.userId,
+    beliefWriter: new BeliefWriter(deps.cols.beliefs),
+    workspaceState: deps.workspaceState,
+  });
+
   await app.register(fastifySchedule);
 
   app.addHook("onReady", async () => {
@@ -319,6 +332,21 @@ export async function buildServer(deps: ServerDeps): Promise<FastifyInstance> {
     const target =
       cfg.onboarding_status === "completed" ? "/beliefs" : "/onboarding";
     return reply.redirect(target, 302);
+  });
+
+  const isReplicaSet = await deps.db
+    .admin()
+    .command({ hello: 1 })
+    .then((r) => !!(r.setName || r.hosts))
+    .catch(() => false);
+
+  const stopChangeStream = isReplicaSet
+    ? startBeliefChangeStream(deps.cols.beliefs_plain, deps.userId)
+    : null;
+
+  app.addHook("onClose", (_instance, done) => {
+    stopChangeStream?.();
+    done();
   });
 
   return app;

@@ -1,11 +1,10 @@
 import * as vscode from "vscode";
-import {
-  getLocalFallbackSlug,
-  resolveNearestPackageName,
-} from "./packageResolver.js";
 import { resolveGitRemote } from "./gitResolver.js";
 import type { TokenStore } from "./tokenStore.js";
 import { readTenureConfig } from "./tenureConfig.js";
+import { TenureBeliefsViewProvider } from "./beliefsViewProvider.js";
+import path, { basename } from "node:path";
+import { createHash } from "node:crypto";
 
 export interface WorkspaceState {
   workspace_root: string;
@@ -17,27 +16,27 @@ export interface WorkspaceState {
 
 export class WorkspaceSync {
   private lastSyncedState: string | null = null;
-
-  private loadPersistedState(): void {
-    this.lastSyncedState =
-      this.context.workspaceState.get<string>("tenure.lastSyncedState") ?? null;
-  }
   private syncTimer: ReturnType<typeof setTimeout> | null = null;
+
+  private cachedProjectName: string | null = null;
+  private cachedGitRemote: string | null = null;
+  private workspaceResolved = false;
 
   constructor(
     private readonly tokenStore: TokenStore,
-    private readonly output: vscode.OutputChannel,
     private readonly context: vscode.ExtensionContext,
     private readonly statusBar?: vscode.StatusBarItem,
+    private readonly beliefsProvider?: TenureBeliefsViewProvider,
   ) {
     this.lastSyncedState =
       this.context.workspaceState.get<string>("tenure.lastSyncedState") ?? null;
+
+    this.beliefsProvider?.setOnConnectedCallback(() => {
+      this.invalidateCache();
+      this.scheduleSync();
+    });
   }
 
-  /**
-   * Debounced sync. Coalesces rapid editor switches (e.g. opening a file)
-   * into a single request 300ms after the last event fires.
-   */
   scheduleSync(): void {
     if (this.syncTimer) clearTimeout(this.syncTimer);
     this.syncTimer = setTimeout(() => this.sync(), 300);
@@ -45,10 +44,49 @@ export class WorkspaceSync {
 
   invalidateCache(): void {
     this.lastSyncedState = null;
+    this.workspaceResolved = false;
+    this.cachedProjectName = null;
+    this.cachedGitRemote = null;
     void this.context.workspaceState.update(
       "tenure.lastSyncedState",
       undefined,
     );
+  }
+
+  invalidateManifestCache(): void {
+    this.workspaceResolved = false;
+    this.cachedProjectName = null;
+  }
+
+  getLastProjectName(): string | null {
+    return this.cachedProjectName ?? null;
+  }
+
+  reconnectBeliefs(): void {
+    this.beliefsProvider?.reconnect().catch(() => {});
+  }
+
+  sendActiveFileUpdate(
+    activeFile: string,
+    activeLanguage: string,
+    fileUri: vscode.Uri,
+  ): void {
+    if (!this.beliefsProvider || !this.cachedProjectName) return;
+
+    const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+    if (!workspaceFolder) return;
+
+    this.beliefsProvider.sendWorkspaceState({
+      workspace_root: workspaceFolder.uri.fsPath,
+      project_name: this.cachedProjectName,
+      git_remote: this.cachedGitRemote,
+      active_file: activeFile,
+      active_language: activeLanguage,
+    });
+
+    vscode.workspace.fs.stat(fileUri).then((stat) => {
+      this.beliefsProvider?.sendFileMeta(activeFile, stat.size);
+    });
   }
 
   async sync(): Promise<void> {
@@ -76,31 +114,21 @@ export class WorkspaceSync {
       return;
     }
 
+    if (!this.workspaceResolved) {
+      await this.resolveWorkspaceLevel(workspaceFolder.uri);
+    }
+
     const activeEditor = vscode.window.activeTextEditor;
-
     const activeFileUri = activeEditor?.document.uri ?? null;
-    const workspaceRootUri = workspaceFolder.uri;
-
-    const tenureConfig = await readTenureConfig(workspaceRootUri);
-    const packageName = await resolveNearestPackageName(
-      activeFileUri ?? undefined,
-      workspaceRootUri,
-    );
-    const gitRemote = resolveGitRemote(workspaceRootUri);
-    const gitName = gitRemote ? extractRepoName(gitRemote) : null;
-
-    const projectName =
-      tenureConfig?.projectId ??
-      packageName ??
-      gitName ??
-      getLocalFallbackSlug(workspaceRootUri.fsPath);
+    const activeFile = activeFileUri ? toRelativeFile(activeFileUri) : null;
+    const activeLanguage = activeEditor?.document.languageId ?? null;
 
     const state: WorkspaceState = {
-      workspace_root: workspaceRootUri.fsPath,
-      project_name: projectName,
-      git_remote: gitRemote,
-      active_file: activeFileUri?.fsPath ?? null,
-      active_language: activeEditor?.document.languageId ?? null,
+      workspace_root: workspaceFolder.uri.fsPath,
+      project_name: this.cachedProjectName!,
+      git_remote: this.cachedGitRemote,
+      active_file: activeFile,
+      active_language: activeLanguage,
     };
 
     const stateKey = JSON.stringify(state);
@@ -120,40 +148,39 @@ export class WorkspaceSync {
       }
     }
 
-    try {
-      const res = await fetch(`${baseUrl}/v1/workspace/state`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-          "x-tenure-ide": "1",
-        },
-        body: JSON.stringify(state),
-        signal: AbortSignal.timeout(3000),
-      });
+    this.lastSyncedState = stateKey;
+    await this.context.workspaceState.update(
+      "tenure.lastSyncedState",
+      stateKey,
+    );
 
-      if (res.ok) {
-        this.lastSyncedState = stateKey;
-        await this.context.workspaceState.update(
-          "tenure.lastSyncedState",
-          stateKey,
-        );
-        if (this.statusBar) {
-          this.statusBar.text = `$(symbol-misc) Tenure: ${projectName}`;
-          this.statusBar.command = "tenure.openBeliefs";
-        }
-      } else {
-        this.output.appendLine(
-          `[Tenure] Workspace sync failed: ${res.status} ${res.statusText}`,
-        );
-      }
-    } catch {
-      // Tenure not running or unreachable — fail silently
+    if (this.statusBar) {
+      this.statusBar.text = `$(symbol-misc) Tenure: ${this.cachedProjectName}`;
+      this.statusBar.command = "tenure.openBeliefs";
+    }
+
+    if (this.beliefsProvider) {
+      await this.beliefsProvider.ensureConnected();
+      this.beliefsProvider.sendWorkspaceState(state);
     }
   }
 
   dispose(): void {
     if (this.syncTimer) clearTimeout(this.syncTimer);
+  }
+
+  private async resolveWorkspaceLevel(rootUri: vscode.Uri): Promise<void> {
+    const tenureConfig = await readTenureConfig(rootUri);
+    const gitRemote = resolveGitRemote(rootUri);
+    const gitName = gitRemote ? extractRepoName(gitRemote) : null;
+
+    this.cachedGitRemote = gitRemote;
+    this.cachedProjectName =
+      tenureConfig?.projectId ??
+      gitName ??
+      getLocalFallbackSlug(rootUri.fsPath);
+
+    this.workspaceResolved = true;
   }
 
   private async migrateScope(
@@ -189,4 +216,27 @@ function slugify(name: string): string {
     .replace(/[^a-z0-9-]/g, "-")
     .replace(/-+/g, "-")
     .replace(/^-|-$/g, "");
+}
+
+function toRelativeFile(fileUri: vscode.Uri): string | null {
+  // 1. Pass 'true' to exclude the workspace folder name in multi-root setups.
+  // This ensures a file in 'src/main.js' always returns 'src/main.js'.
+  const relative = vscode.workspace.asRelativePath(fileUri, true);
+
+  // 2. VS Code returns a path with forward slashes. On Windows, path.isAbsolute()
+  // handles forward slashes perfectly fine to determine if it's an absolute fallback.
+  if (path.isAbsolute(relative)) {
+    return null; // File is outside any open workspace folder
+  }
+
+  return relative;
+}
+
+function getLocalFallbackSlug(workspaceRoot: string): string {
+  const folderName = basename(workspaceRoot);
+  const hash = createHash("md5")
+    .update(workspaceRoot)
+    .digest("hex")
+    .slice(0, 8);
+  return `${folderName}-${hash}`;
 }

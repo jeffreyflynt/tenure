@@ -6,7 +6,7 @@ permissions:
 on:
   push:
     tags:
-      - "v*"
+      - "openclaw-v*"
   workflow_dispatch:
     inputs:
       dry_run:
@@ -59,7 +59,7 @@ jobs:
         run: |
           if [[ "${{ github.event_name }}" == "push" ]]; then
             VERSION="${{ github.ref_name }}"
-            echo "value=${VERSION#v}" >> "$GITHUB_OUTPUT"
+            echo "value=${VERSION#openclaw-v}" >> "$GITHUB_OUTPUT"
           else
             # For manual runs, fall back to the version already in package.json
             echo "value=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
@@ -86,7 +86,7 @@ jobs:
       - name: Publish to ClaWHub
         if: ${{ !inputs.dry_run }}
         run: |
-          clawhub package publish "tenurehq/tenure@main" \
+          clawhub package publish "@tenureai/openclaw-plugin@${{ steps.version.outputs.value }}" \
             --clawscan-note "Injects agent-scope headers for multi-agent isolation and forwards requests to a user-run localhost Tenure proxy (port 5757). No data leaves localhost except to the user's configured Anthropic or OpenAI endpoint." \
             --source-repo https://github.com/tenurehq/tenure \
             --source-commit $(git rev-parse HEAD) \

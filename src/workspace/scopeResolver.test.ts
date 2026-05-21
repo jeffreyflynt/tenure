@@ -39,7 +39,6 @@ test.serial(
     await cache.set(USER_ID, {
       workspace_root: "/home/dev/my-project",
       project_name: "My Project",
-      active_package: null,
       git_remote: null,
       active_file: null,
       active_language: "typescript",
@@ -60,7 +59,6 @@ test.serial(
     await cache.set(USER_ID, {
       workspace_root: "/home/dev/app",
       project_name: "@scope/My--Cool App!!",
-      active_package: null,
       git_remote: null,
       active_file: null,
       active_language: null,
@@ -81,7 +79,6 @@ test.serial(
     await cache.set(USER_ID, {
       workspace_root: "/home/dev/app",
       project_name: "app",
-      active_package: null,
       git_remote: null,
       active_file: null,
       active_language: null,
@@ -118,7 +115,6 @@ test.serial("priority 1: maps known languages correctly", async (t) => {
     await cache.set(USER_ID, {
       workspace_root: "/dev",
       project_name: "test",
-      active_package: null,
       git_remote: null,
       active_file: null,
       active_language: lang,
@@ -141,7 +137,6 @@ test.serial(
     await cache.set(USER_ID, {
       workspace_root: "/dev",
       project_name: "test",
-      active_package: null,
       git_remote: null,
       active_file: null,
       active_language: "haskell",
@@ -196,7 +191,6 @@ test.serial(
     await cache.set("user-both", {
       workspace_root: "/dev",
       project_name: "from-extension",
-      active_package: null,
       git_remote: null,
       active_file: null,
       active_language: null,

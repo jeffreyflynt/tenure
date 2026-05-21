@@ -224,7 +224,7 @@ export function registerChatRoute(app: FastifyInstance, deps: ChatDeps): void {
 
     let scope = metadata?.scope?.length
       ? metadata.scope
-      : (session?.activeScope ?? []);
+      : session?.activeScope ?? [];
 
     const turnId = randomUUID();
     const rawContent: string | ContentPart[] = messages.at(-1)?.content ?? "";
@@ -454,8 +454,8 @@ export function registerChatRoute(app: FastifyInstance, deps: ChatDeps): void {
       incomingSystem === undefined
         ? undefined
         : typeof incomingSystem === "string"
-          ? incomingSystem
-          : extractText(incomingSystem);
+        ? incomingSystem
+        : extractText(incomingSystem);
 
     let ideScope: {
       projectScope: string | null;
@@ -490,11 +490,6 @@ export function registerChatRoute(app: FastifyInstance, deps: ChatDeps): void {
         ideScope.languageScope =
           ideScope.languageScope ??
           deps.workspaceState.resolveLanguageScope(userId);
-      }
-
-      if (deps.workspaceState) {
-        const wsState = deps.workspaceState.get(userId);
-        activePackage = wsState?.active_package ?? null;
       }
     }
 
@@ -1000,7 +995,6 @@ async function runSideEffects(input: SideEffectInput): Promise<void> {
               project_scope: input.ideProjectScope,
               language_scope: input.ideLanguageScope,
               active_file: input.ideActiveFile,
-              active_package: input.activePackage,
             } as const)
           : undefined;
 

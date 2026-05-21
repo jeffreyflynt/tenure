@@ -100,13 +100,17 @@ export async function buildApp(config: BootstrapConfig) {
   await client.connect();
   console.log("MongoDB connected (CSFLE enabled)");
 
+  const plainClient = new MongoClient(config.mongodb_uri);
+  await plainClient.connect();
+
   const db = client.db(config.mongodb_db);
+  const plainDb = plainClient.db(config.mongodb_db);
 
   console.log("Verifying CSFLE is active...");
   await verifyEncryptionActive(db, config.mongodb_uri, config.mongodb_db);
   console.log("CSFLE verified — belief content is encrypted at rest");
 
-  const cols = getCollections(db);
+  const cols = getCollections(db, plainDb);
   await ensureIndexes(cols);
   await ensureSearchIndexes(db);
 
@@ -198,6 +202,7 @@ export async function buildApp(config: BootstrapConfig) {
     async close() {
       await server.close();
       await client.close();
+      await plainClient.close();
     },
   };
 }

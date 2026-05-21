@@ -1,0 +1,74 @@
+name: Publish VS Code Extension
+
+permissions:
+  id-token: write
+  contents: read
+
+on:
+  push:
+    tags:
+      - "vscode-v*"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry run (no publish)"
+        type: boolean
+        default: false
+
+jobs:
+  publish:
+    name: Build and publish tenure-vscode
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: integrations/vscode
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "25"
+          cache: npm
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Resolve version from tag
+        id: version
+        run: |
+          if [[ "${{ github.event_name }}" == "push" ]]; then
+            VERSION="${{ github.ref_name }}"
+            echo "value=${VERSION#vscode-v}" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Sync version from tag
+        if: github.event_name == 'push'
+        run: |
+          VERSION=${{ steps.version.outputs.value }}
+          jq --arg v "$VERSION" '.version = $v' package.json > package.tmp.json && mv package.tmp.json package.json
+
+      - name: Build
+        run: npm run build
+
+      - name: Package extension
+        run: npx vsce package --no-dependencies
+
+      - name: Publish to VS Code Marketplace
+        if: ${{ !inputs.dry_run }}
+        run: npx vsce publish --no-dependencies --packagePath *.vsix
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+
+      - name: Publish to Open VSX
+        if: ${{ !inputs.dry_run }}
+        run: npx ovsx publish *.vsix
+        env:
+          OVSX_PAT: ${{ secrets.OVSX_PAT }}
+
+      - name: Dry run
+        if: ${{ inputs.dry_run }}
+        run: npx vsce package --no-dependencies && echo "Dry run complete, vsix built OK"

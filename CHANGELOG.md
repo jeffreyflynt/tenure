@@ -6,6 +6,32 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [1.0.15] - 2026-05-21
+
+### Added
+
+- **Beliefs sidebar** (`integrations/vscode/src/beliefsViewProvider.ts`): New Activity Bar panel ("Active Beliefs") that displays live beliefs for the current project via a WebSocket connection. Only visible when a token is configured.
+- **`Tenure: Record Project Belief` command**: Opens the beliefs sidebar form to record a belief directly from the command palette.
+- **`Tenure: Record Belief from Selection` command**: Same as above, also accessible via the editor right-click context menu when text is selected.
+- **WebSocket beliefs route** (`src/routes/beliefs-ws.ts`): Server-side WebSocket endpoint powering real-time belief updates to the sidebar, backed by a MongoDB change stream (`src/db/beliefChangeStream.ts`).
+
+### Changed
+
+- **VS Code extension bumped to `1.0.15`**.
+- **Project scope resolution simplified**: The manifest-walking approach (scanning for `package.json`, `Cargo.toml`, `go.mod`, etc.) has been replaced. Project name is now resolved from a plain-text `.tenure` file at the workspace root (just your project name on a single line), with git remote and folder-slug as fallbacks. The file watcher now only watches `.tenure` instead of all manifest files.
+- **`tenureConfig.ts` simplified**: `.tenure` is now parsed as plain text rather than JSON. The `TenureProjectConfig` interface is removed.
+- **`active_package` field removed** from `WorkspaceState`, workspace route, and `WorkspaceStateCache` — superseded by the simplified scope model.
+- **`WorkspaceSync` gains result caching**: `cachedProjectName` and `cachedGitRemote` fields avoid redundant resolution on each sync. Cache is invalidated on `.tenure` file changes.
+- **`@fastify/websocket` registered** in `server.ts` to support the new WebSocket route.
+- **OpenClaw publish workflow**: Tag prefix changed from `v*` to `openclaw-v*`; publish target updated from `tenurehq/tenure@main` to `@tenureai/openclaw-plugin@<version>`.
+- **VS Code test runner pinned** to VS Code `1.121.0`; `@vscode/test-cli` downgraded to `0.0.11`.
+
+### Removed
+
+- **`packageResolver.ts`** and its test suite deleted — manifest-based project resolution is no longer used.
+
+---
+
 ## [1.0.14] - 2026-05-19
 
 ### Added

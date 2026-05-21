@@ -2,7 +2,7 @@
   "name": "tenure-vscode",
   "displayName": "Tenure",
   "description": "Persistent AI memory that follows you across every tool, session, and interface. Fully local.",
-  "version": "1.0.14",
+  "version": "1.0.15",
   "publisher": "tenureai",
   "license": "MIT",
   "icon": "resources/tenure-logo-icon.png",
@@ -125,8 +125,44 @@
       {
         "command": "tenure.openBeliefs",
         "title": "Tenure: Open Beliefs Dashboard"
+      },
+      {
+        "command": "tenure.recordBelief",
+        "title": "Tenure: Record Project Belief"
+      },
+      {
+        "command": "tenure.recordBeliefFromSelection",
+        "title": "Tenure: Record Belief from Selection"
       }
-    ]
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "tenure.recordBeliefFromSelection",
+          "when": "editorHasSelection && tenure.tokenConfigured",
+          "group": "9_cutcopypaste"
+        }
+      ]
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "tenure",
+          "title": "Tenure",
+          "icon": "resources/tenure-sidebar-icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "tenure": [
+        {
+          "type": "webview",
+          "id": "tenure.beliefsView",
+          "name": "Active Beliefs",
+          "when": "tenure.tokenConfigured"
+        }
+      ]
+    }
   },
   "extensionDependencies": [
     "vscode.git"
@@ -135,7 +171,7 @@
     "build": "tsup src/extension.ts --out-dir out --format cjs --external vscode --no-splitting",
     "build:test": "tsup 'src/test/**/*.ts' --out-dir out/test --format cjs --external vscode --no-splitting --tsconfig tsconfig.test.json",
     "watch": "tsc -watch -p tsconfig.json",
-    "package": "vsce package",
+    "package": "npm run build && vsce package",
     "publish": "vsce publish",
     "test": "npm run build && npm run build:test && vscode-test"
   },
@@ -145,11 +181,15 @@
     "@types/node": "25.9.1",
     "@types/vscode": "1.85.0",
     "@typescript/native-preview": "^7.0.0-dev.20260519.1",
-    "@vscode/test-cli": "^0.0.12",
+    "@vscode/test-cli": "^0.0.11",
     "@vscode/test-electron": "^2.5.2",
     "@vscode/vsce": "3.9.1",
     "mocha": "^11.7.5",
     "tsup": "^8.5.1",
     "typescript": "6.0.3"
+  },
+  "overrides": {
+    "diff": "9.0.0",
+    "serialize-javascript": "7.0.5"
   }
 }

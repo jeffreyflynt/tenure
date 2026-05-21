@@ -19,7 +19,6 @@ export interface EnqueueParams {
     project_scope: string | null;
     language_scope: string | null;
     active_file: string | null;
-    active_package: string | null;
   };
 }
 

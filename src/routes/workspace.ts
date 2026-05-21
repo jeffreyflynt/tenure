@@ -17,7 +17,6 @@ export function registerWorkspaceRoutes(
       git_remote?: string | null;
       active_file?: string | null;
       active_language?: string | null;
-      active_package?: string | null;
     };
 
     if (!body.workspace_root || !body.project_name) {
@@ -29,7 +28,6 @@ export function registerWorkspaceRoutes(
     await deps.workspaceState.set(deps.userId, {
       workspace_root: body.workspace_root,
       project_name: body.project_name,
-      active_package: body.active_package ?? null,
       git_remote: body.git_remote ?? null,
       active_file: body.active_file ?? null,
       active_language: body.active_language ?? null,

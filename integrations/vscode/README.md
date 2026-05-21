@@ -2,6 +2,8 @@
 
 Persistent, cross-application AI memory. Connects your tools, agents, and interfaces with a shared, evolving understanding. Fully local and private.
 
+> **This extension requires Tenure to be running locally.** Without it, nothing syncs, no beliefs are stored, and the sidebar stays empty. See [Don't have Tenure installed?](#dont-have-tenure-installed) below to get up and running in under two minutes.
+
 ## The workflow this unlocks
 
 You spend an hour in OpenWebUI thinking through an architecture problem. You explore options, rule some out, land on a direction. Then you open VS Code to start building.
@@ -64,11 +66,14 @@ Cursor Pro and the Claude Code VS Code extension route through their own backend
 
 ## Commands
 
-| Command                          | Description                                   |
-| -------------------------------- | --------------------------------------------- |
-| `Tenure: Set API Token`          | Store your Tenure token securely              |
-| `Tenure: Sync Workspace State`   | Manually trigger a sync                       |
-| `Tenure: Open Beliefs Dashboard` | Open `localhost:5757/beliefs` in your browser |
+| Command                                | Description                                       |
+| -------------------------------------- | ------------------------------------------------- |
+| `Tenure: Set API Token`                | Store your Tenure token securely                  |
+| `Tenure: Sync Workspace State`         | Manually trigger a sync                           |
+| `Tenure: Open Beliefs Dashboard`       | Open `localhost:5757/beliefs` in your browser     |
+| `Tenure: Record Project Belief`        | Record a belief directly from the command palette |
+| `Tenure: Record Belief from Selection` | Record a belief from selected code                |
+| `Tenure: Create .tenure File`          | Scaffold a .tenure file with your resolved name   |
 
 ## Settings
 
@@ -77,20 +82,17 @@ Cursor Pro and the Claude Code VS Code extension route through their own backend
 | `tenure.baseUrl` | `http://localhost:5757` | URL of your local Tenure proxy  |
 | `tenure.enabled` | `true`                  | Enable or disable the extension |
 
-## Monorepo and multi-language support
+## Project scope
 
-The extension walks upward from your active file looking for the nearest
-project manifest — `package.json`, `Cargo.toml`, `go.mod`, `pyproject.toml`,
-`setup.py`, `pom.xml`, `settings.gradle`, `.sln`, or `.csproj`. Whichever
-it finds first becomes the project scope sent to Tenure.
+Tenure resolves your project name from a `.tenure` file at your workspace root.
+Create one with just your project name:
 
-In a monorepo with `packages/proxy/src/foo.ts` open, it resolves `proxy`,
-not the root workspace name. Switch to a file in `packages/auth` and scope
-switches with you. Beliefs are always attributed to the right package
-regardless of where you are in the tree.
+f no .tenure file exists, Tenure falls back to your git remote name, then
+a stable slug derived from your workspace folder name. Scope resolution never
+fails silently.
 
-If no manifest is found, the extension falls back to a stable slug derived
-from your workspace folder name so scope resolution never fails silently.
+Run `Tenure: Create .tenure File` from the command palette to scaffold one
+automatically using the name Tenure has already resolved for your project.
 
 ## Why not just use AGENTS.md or shared MCP memory?
 

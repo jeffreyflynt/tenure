@@ -3,7 +3,6 @@ import type { Collection, Db } from "mongodb";
 export interface WorkspaceState {
   workspace_root: string;
   project_name: string;
-  active_package: string | null;
   git_remote: string | null;
   active_file: string | null;
   active_language: string | null;
@@ -51,7 +50,6 @@ export class WorkspaceStateCache {
       const state: WorkspaceState = {
         workspace_root: doc.workspace_root,
         project_name: doc.project_name,
-        active_package: doc.active_package ?? null,
         git_remote: doc.git_remote,
         active_file: doc.active_file,
         active_language: doc.active_language,

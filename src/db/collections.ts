@@ -26,6 +26,16 @@ export interface OnboardingDraftDoc {
   created_at: Date;
 }
 
+export interface FileMetaDoc {
+  _id: string;
+  user_id: string;
+  path: string;
+  size_bytes: number;
+  belief_ids: string[];
+  created_at: Date;
+  updated_at: Date;
+}
+
 export interface TopicIndexEntry {
   _id: string;
   user_id: string;
@@ -36,6 +46,7 @@ export interface TopicIndexEntry {
 
 export interface Collections {
   db: Db;
+  beliefs_plain: Collection<Belief>;
   beliefs: Collection<Belief>;
   turns: Collection<Turn>;
   sessions: Collection<Session>;
@@ -47,11 +58,14 @@ export interface Collections {
   compaction_log: Collection<CompactionLogEntry>;
   contradictions: Collection<BeliefContradiction>;
   onboarding_drafts: Collection<OnboardingDraftDoc>;
+  file_meta: Collection<FileMetaDoc>;
 }
 
-export function getCollections(db: Db): Collections {
+export function getCollections(db: Db, plainDb?: Db): Collections {
+  const plain = plainDb ?? db;
   return {
     db,
+    beliefs_plain: plain.collection<Belief>("beliefs"),
     beliefs: db.collection<Belief>("beliefs"),
     turns: db.collection<Turn>("turns"),
     sessions: db.collection<Session>("sessions"),
@@ -63,5 +77,6 @@ export function getCollections(db: Db): Collections {
     compaction_log: db.collection<CompactionLogEntry>("compaction_log"),
     contradictions: db.collection<BeliefContradiction>("belief_contradictions"),
     onboarding_drafts: db.collection<OnboardingDraftDoc>("onboarding_drafts"),
+    file_meta: db.collection<FileMetaDoc>("file_meta"),
   };
 }

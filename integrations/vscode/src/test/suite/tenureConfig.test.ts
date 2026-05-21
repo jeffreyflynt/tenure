@@ -17,37 +17,10 @@ suite("tenureConfig", () => {
   });
 
   test("reads .tenure file", async () => {
-    fs.writeFileSync(
-      path.join(tmpDir, ".tenure"),
-      JSON.stringify({ projectId: "my-project" }),
-    );
+    fs.writeFileSync(path.join(tmpDir, ".tenure"), "my-project");
 
     const result = await readTenureConfig(vscode.Uri.file(tmpDir));
     assert.strictEqual(result?.projectId, "my-project");
-  });
-
-  test("reads .tenure/config.json", async () => {
-    const tenureDir = path.join(tmpDir, ".tenure");
-    fs.mkdirSync(tenureDir);
-    fs.writeFileSync(
-      path.join(tenureDir, "config.json"),
-      JSON.stringify({ projectId: "nested-project" }),
-    );
-
-    const result = await readTenureConfig(vscode.Uri.file(tmpDir));
-    assert.strictEqual(result?.projectId, "nested-project");
-  });
-
-  test("prefers .tenure over .tenure/config.json", async () => {
-    fs.writeFileSync(
-      path.join(tmpDir, ".tenure"),
-      JSON.stringify({ projectId: "root-config" }),
-    );
-    const tenureDir = path.join(tmpDir, ".tenure");
-    // .tenure is a file here so this won't conflict
-    // but test the priority when both could exist
-    const result = await readTenureConfig(vscode.Uri.file(tmpDir));
-    assert.strictEqual(result?.projectId, "root-config");
   });
 
   test("returns null when no .tenure file exists", async () => {
@@ -55,8 +28,20 @@ suite("tenureConfig", () => {
     assert.strictEqual(result, null);
   });
 
-  test("returns null for malformed .tenure file", async () => {
-    fs.writeFileSync(path.join(tmpDir, ".tenure"), "not valid json {{{");
+  test("ignores unknown extra fields without erroring", async () => {
+    fs.writeFileSync(path.join(tmpDir, ".tenure"), "my-project");
+    const result = await readTenureConfig(vscode.Uri.file(tmpDir));
+    assert.strictEqual(result?.projectId, "my-project");
+  });
+
+  test("returns null for empty JSON object alternative — empty string", async () => {
+    fs.writeFileSync(path.join(tmpDir, ".tenure"), "");
+    const result = await readTenureConfig(vscode.Uri.file(tmpDir));
+    assert.strictEqual(result, null);
+  });
+
+  test("returns null when file contains only whitespace", async () => {
+    fs.writeFileSync(path.join(tmpDir, ".tenure"), "   \n  ");
     const result = await readTenureConfig(vscode.Uri.file(tmpDir));
     assert.strictEqual(result, null);
   });

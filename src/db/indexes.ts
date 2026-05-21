@@ -189,6 +189,15 @@ export async function ensureIndexes(cols: Collections): Promise<void> {
       key: { user_id: 1, last_reinforced_at: -1 },
       partialFilterExpression: { superseded_by: null },
     },
+    {
+      key: { user_id: 1, "origin_context.active_file": 1, scope: 1 },
+      name: "beliefs_origin_file",
+      partialFilterExpression: {
+        superseded_by: null,
+        resolved_at: null,
+        "origin_context.active_file": { $type: "string" },
+      },
+    },
   ]);
 
   await cols.jobs.createIndexes([
@@ -275,7 +284,9 @@ export async function ensureSearchIndexes(db: Db): Promise<void> {
       const found = currentIndexes.find((i) => i.name === idx.name);
       if (found) {
         console.log(
-          `Dropping outdated search index: ${idx.name} (v${existing?.version ?? "?"})`,
+          `Dropping outdated search index: ${idx.name} (v${
+            existing?.version ?? "?"
+          })`,
         );
         await collection.dropSearchIndex(idx.name);
         await waitForIndexDrop(collection, idx.name);
